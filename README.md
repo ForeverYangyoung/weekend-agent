@@ -1,5 +1,7 @@
 # weekend-agent
 
+[![GitHub](https://img.shields.io/badge/GitHub-ForeverYangyoung%2Fweekend--agent-blue)](https://github.com/ForeverYangyoung/weekend-agent)
+
 美团 AI Hackathon · 赛题 06：**本地探索 — 周末闲时活动规划 Agent**
 
 一句话描述周末出行需求，Agent 完成「画像 → 规划 → 校验 → 模拟执行 → 行程卡通知」闭环（LangGraph + FastAPI SSE）。
