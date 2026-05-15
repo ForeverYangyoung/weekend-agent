@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Weekend Agent · 流式测试</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4d;
+      --text: #e7ecf3;
+      --muted: #8b9cb3;
+      --accent: #3b82f6;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+    header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; }
+    header p { margin: 0.35rem 0 0; font-size: 0.85rem; color: var(--muted); }
+    main { max-width: 960px; margin: 0 auto; padding: 1.25rem; }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.35rem; }
+    textarea {
+      width: 100%;
+      min-height: 100px;
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #111820;
+      color: var(--text);
+      font-size: 0.95rem;
+      resize: vertical;
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; margin-top: 1rem; }
+    .field { flex: 1; min-width: 200px; }
+    select {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #111820;
+      color: var(--text);
+      font-size: 0.9rem;
+    }
+    button {
+      padding: 0.6rem 1.25rem;
+      border: none;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.95rem;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1.25rem; }
+    @media (max-width: 720px) { .panels { grid-template-columns: 1fr; } }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .panel h2 {
+      margin: 0;
+      padding: 0.6rem 0.85rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .panel-body { padding: 0.85rem; max-height: 420px; overflow: auto; font-size: 0.85rem; }
+    #traceLog { font-family: ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+    .line { margin: 0.15rem 0; color: #c4d4e8; }
+    .line.event { color: var(--warn); }
+    .share { background: #0d2818; border: 1px solid #166534; border-radius: 8px; padding: 0.75rem; margin-top: 0.75rem; color: #bbf7d0; }
+    pre.md { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, Consolas, monospace; font-size: 0.8rem; color: #cbd5e1; }
+    .hint { font-size: 0.8rem; color: var(--muted); margin-top: 1rem; }
+    .hint code { background: #111820; padding: 0.1rem 0.35rem; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Weekend Agent · 浏览器流式测试</h1>
+    <p>本页由 FastAPI 托管。点「开始规划」会通过 <code>fetch</code> 调用同源 <code>POST /v1/agent/stream</code>（与 <code>POST /agent/stream</code> 等价），实时显示 trace。地址也可用 <code>/ui</code>；误开 <code>/ground</code> 会重定向到本页。</p>
+  </header>
+  <main>
+    <label for="userInput">用户一句话</label>
+    <textarea id="userInput" placeholder="例如：下午两个人随便逛逛">下午两个人随便逛逛</textarea>
+    <div class="row">
+      <div class="field">
+        <label for="forceFail">演示失败（可选，补偿链）</label>
+        <select id="forceFail">
+          <option value="">不注入失败</option>
+          <option value="玩">玩 阶段失败</option>
+          <option value="吃">吃 阶段失败</option>
+          <option value="加餐">加餐 阶段失败</option>
+        </select>
+      </div>
+      <button type="button" id="runBtn">开始规划</button>
+    </div>
+
+    <div class="panels">
+      <div class="panel">
+        <h2>执行链路（流式追加）</h2>
+        <div class="panel-body" id="traceLog"></div>
+      </div>
+      <div class="panel">
+        <h2>最终结果</h2>
+        <div class="panel-body" id="finalPanel">
+          <span class="muted">运行结束后显示摘要与行程卡。</span>
+        </div>
+      </div>
+    </div>
+    <p class="hint">API 文档：<a href="/docs" style="color: var(--accent);">/docs</a> · 健康检查：<a href="/health" style="color: var(--accent);">/health</a></p>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const traceLog = $("traceLog");
+    const finalPanel = $("finalPanel");
+    const runBtn = $("runBtn");
+
+    function appendTrace(text, isEvent) {
+      const div = document.createElement("div");
+      div.className = "line" + (isEvent ? " event" : "");
+      div.textContent = text;
+      traceLog.appendChild(div);
+      traceLog.scrollTop = traceLog.scrollHeight;
+    }
+
+    function clearOutputs() {
+      traceLog.innerHTML = "";
+      finalPanel.innerHTML = '<span style="color:var(--muted)">运行中…</span>';
+    }
+
+    async function runStream() {
+      const user_input = $("userInput").value.trim();
+      const ff = $("forceFail").value;
+      if (!user_input) {
+        alert("请输入一句话");
+        return;
+      }
+      const body = { user_input };
+      if (ff) body.force_failure = ff;
+
+      runBtn.disabled = true;
+      clearOutputs();
+
+      try {
+        const res = await fetch("/v1/agent/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const t = await res.text();
+          throw new Error(res.status + " " + t);
+        }
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = "";
+        let lastTraceLen = 0;
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          const parts = buf.split("\n\n");
+          buf = parts.pop() ?? "";
+          for (const block of parts) {
+            const line = block.trim();
+            if (!line.startsWith("data: ")) continue;
+            let payload;
+            try {
+              payload = JSON.parse(line.slice(6));
+            } catch (e) {
+              appendTrace("[parse error] " + line.slice(0, 120), true);
+              continue;
+            }
+            const ev = payload.event;
+            if (ev === "start") {
+              appendTrace("▶ start", true);
+            } else if (ev === "state") {
+              const st = payload.state || {};
+              const trace = st.trace || [];
+              for (let i = lastTraceLen; i < trace.length; i++) {
+                appendTrace(trace[i], false);
+              }
+              lastTraceLen = trace.length;
+            } else if (ev === "final") {
+              appendTrace("── final ──", true);
+              const s = payload.summary || {};
+              const card = payload.summary_card;
+              let html = "<div><strong>摘要</strong><pre style='margin:0.5rem 0'>" + JSON.stringify(s, null, 2) + "</pre></div>";
+              if (card) {
+                html += "<div><strong>" + escapeHtml(card.title || "行程卡") + "</strong>";
+                if (card.share_text) {
+                  html += "<div class='share'>" + escapeHtml(card.share_text) + "</div>";
+                }
+                if (card.body_markdown) {
+                  html += "<pre class='md'>" + escapeHtml(card.body_markdown) + "</pre>";
+                }
+                html += "</div>";
+              }
+              finalPanel.innerHTML = html;
+            } else if (ev === "done") {
+              appendTrace("✓ done", true);
+            } else if (ev === "error") {
+              appendTrace("✗ " + (payload.message || JSON.stringify(payload)), true);
+              finalPanel.innerHTML = "<span style='color:#f87171'>" + escapeHtml(String(payload.message || "error")) + "</span>";
+            } else {
+              appendTrace(JSON.stringify(payload), true);
+            }
+          }
+        }
+      } catch (e) {
+        appendTrace("请求失败: " + e.message, true);
+        finalPanel.innerHTML = "<span style='color:#f87171'>" + escapeHtml(e.message) + "</span>";
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    runBtn.addEventListener("click", runStream);
+  </script>
+</body>
+</html>
