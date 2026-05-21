@@ -11,6 +11,27 @@ from pydantic import BaseModel, Field
 # ─────────────────────────── 群体画像 ───────────────────────────
 
 
+class EditableTag(BaseModel):
+    """前端可点改的画像标签胶囊（对应 02.架构和agent.md §3.2 ui_chips）。"""
+
+    key: str  # 对应 GroupProfile 的字段名，如 "scene" / "dietary"
+    label: str  # 展示文案，如 "家庭" / "约 5 小时"
+    value: str = ""  # 序列化后的值，前端编辑后回传
+    confidence: float = 0.0  # 0~1，<0.6 视为低置信，UI 可弱化
+    editable: bool = True
+    source: Literal["utterance", "history", "rule"] = "rule"
+
+
+class ProfileEvidence(BaseModel):
+    """画像字段的证据链：依据哪句关键词、来自哪里。"""
+
+    field: str  # 影响的字段，如 "scene" / "dietary"
+    value: str  # 推断值的字符串形态
+    term: str = ""  # 触发的原文片段，如 "老婆孩子"
+    confidence: float = 0.0
+    source: Literal["utterance", "history", "rule"] = "utterance"
+
+
 class GroupProfile(BaseModel):
     """从用户一句话里抽取出的群体画像。"""
 
@@ -24,6 +45,31 @@ class GroupProfile(BaseModel):
     interests: list[str] = Field(default_factory=list)  # 例 ["亲子", "展览"]
     budget_per_person: int | None = None
     raw_text: str = ""
+    # 每字段置信度（0~1），缺失字段视为 0.5
+    confidence: dict[str, float] = Field(default_factory=dict)
+    # 给前端的可编辑标签；空表示前端不展示
+    editable_tags: list[EditableTag] = Field(default_factory=list)
+    # 每个字段的证据链；面试可亮「依据哪句话推出来的」
+    evidence: list[ProfileEvidence] = Field(default_factory=list)
+    # 历史偏好权重（来自 history_context），0~1，越大越喜欢
+    history_weights: dict[str, float] = Field(default_factory=dict)
+
+
+# ─────────────────────────── 打分明细 ───────────────────────────
+
+
+class ScoreBreakdown(BaseModel):
+    """五维打分明细，附在 POICandidate.breakdown。
+
+    评委追问「为啥选 A 不选 B」时，可亮明细。
+    """
+
+    preference: float = 0.0  # 标签匹配 35%
+    history: float = 0.0  # 历史偏好 20%
+    rating: float = 0.0  # POI 评分 20%
+    distance: float = 0.0  # 距离 15%
+    budget: float = 0.0  # 预算 10%
+    total: float = 0.0
 
 
 # ─────────────────────────── 方案 ───────────────────────────
@@ -35,6 +81,9 @@ class POICandidate(BaseModel):
     category: str  # 餐厅 / 活动 / 加餐 等
     score: float = 0.0
     reason: str = ""  # 为什么推这家（可解释性）
+    metadata: dict = Field(default_factory=dict)  # avg_price / distance_km / open_hours / tags 等
+    # 五维加权打分明细，None 表示尚未打分（如 stub 兜底方案）
+    breakdown: ScoreBreakdown | None = None
 
 
 class PlanStage(BaseModel):
@@ -53,6 +102,28 @@ class Plan(BaseModel):
     stages: list[PlanStage] = Field(default_factory=list)
     total_duration_hours: float = 0.0
     total_cost_estimate: int = 0  # 单位：元
+    # 方案总分（取所有 stage.primary.breakdown.total 平均）；用于 Top-K 排序
+    score: float = 0.0
+    # 阶段顺序，例如 "玩→吃→加餐" / "吃→玩→加餐"，给评委展示「试过多种顺序」
+    order_label: str = ""
+
+
+# ─────────────────────────── Researcher 输出 ───────────────────────────
+
+
+class ResearchStageResult(BaseModel):
+    """单个阶段（玩/吃/加餐）的检索结果。"""
+
+    stage_name: str
+    candidates: list[POICandidate] = Field(default_factory=list)
+    selected: POICandidate | None = None
+
+
+class ResearchResult(BaseModel):
+    """Researcher 节点输出：分阶段 POI 候选 + 工具调用追踪。"""
+
+    stages: list[ResearchStageResult] = Field(default_factory=list)
+    tool_trace: list[str] = Field(default_factory=list)
 
 
 # ─────────────────────────── Critic 反馈 ───────────────────────────

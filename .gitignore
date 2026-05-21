@@ -27,5 +27,27 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Cursor / local assets
-.cursor/
+# Node (future apps/web)
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# Cursor — keep Super Dev commands/rules; ignore other local state
+.cursor/*
+!.cursor/commands/
+!.cursor/commands/**
+!.cursor/rules/
+!.cursor/rules/**
+
+# Super Dev generated artifacts (see output/README.md)
+output/*
+!output/README.md
+!output/weekend-agent-bootstrap.md
+
+# Super Dev runtime state (local only)
+.super-dev/changes/
+.super-dev/review-state/
+.super-dev/workflow-state.json
+.super-dev/SESSION_BRIEF.md

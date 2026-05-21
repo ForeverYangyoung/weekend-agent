@@ -5,6 +5,7 @@ Stub 版本：用规则检查 dietary / interests / distance，凑齐就 approve
 """
 from __future__ import annotations
 
+from weekend_agent.roles import trace_line
 from weekend_agent.schemas import CriticFeedback, CriticIssue
 from weekend_agent.state import AgentState
 
@@ -55,7 +56,11 @@ def critic_node(state: AgentState) -> dict:
     return {
         "critic_feedback": feedback,
         "trace": [
-            f"[Critic] approved={approved} issues={len(issues)} "
-            + ("✓" if approved else "✗ 触发重规划")
+            trace_line(
+                "Planner",
+                f"approved={approved} issues={len(issues)} "
+                + ("✓" if approved else "✗ 触发重规划"),
+                phase="校验",
+            )
         ],
     }

@@ -1,13 +1,17 @@
 """Notifier 节点：生成最终的行程卡 + 给亲友的可分享文案。"""
 from __future__ import annotations
 
+from weekend_agent.roles import trace_line
 from weekend_agent.schemas import SummaryCard
 from weekend_agent.state import AgentState
 
 
-def _render_markdown(plan, profile, executed) -> str:
+def _render_markdown(plan, profile, executed, alternatives) -> str:
     lines = [f"## {plan.summary}", ""]
-    lines.append(f"- 人数：{profile.people_count}　预计花费：约 ¥{plan.total_cost_estimate}")
+    head = f"- 人数：{profile.people_count}　预计花费：约 ¥{plan.total_cost_estimate}"
+    if plan.score:
+        head += f"　综合评分：{plan.score:.2f}"
+    lines.append(head)
     lines.append("")
     lines.append("| 时间 | 阶段 | 地点 | 订单 |")
     lines.append("|---|---|---|---|")
@@ -22,6 +26,16 @@ def _render_markdown(plan, profile, executed) -> str:
         lines.append(
             f"| {s.start_time}–{s.end_time} | {s.name} | {s.primary.name} | `{order}` |"
         )
+
+    if alternatives:
+        lines.append("")
+        lines.append("### 备选方案")
+        for i, alt in enumerate(alternatives, start=1):
+            order_label = alt.order_label or " → ".join(s.name for s in alt.stages)
+            names = " → ".join(s.primary.name for s in alt.stages)
+            lines.append(
+                f"- 方案 {i}（{order_label}，score={alt.score:.2f}，约 ¥{alt.total_cost_estimate}）：{names}"
+            )
     return "\n".join(lines)
 
 
@@ -40,17 +54,24 @@ def notifier_node(state: AgentState) -> dict:
     plan = state.get("plan")
     profile = state.get("group_profile")
     executed = state.get("executed_calls", []) or []
+    alternatives = state.get("plan_alternatives") or []
 
     if not plan or not profile:
-        return {"trace": ["[Notifier] 跳过：缺 plan/profile"]}
+        return {"trace": [trace_line("Executor", "跳过：缺 plan/profile", phase="交付")]}
 
     card = SummaryCard(
         title=plan.summary,
-        body_markdown=_render_markdown(plan, profile, executed),
+        body_markdown=_render_markdown(plan, profile, executed, alternatives),
         share_text=_render_share(plan),
     )
 
     return {
         "summary_card": card,
-        "trace": [f"[Notifier] 行程卡已生成 ✓，分享文案: {card.share_text[:30]}..."],
+        "trace": [
+            trace_line(
+                "Executor",
+                f"行程卡已生成 ✓，分享文案: {card.share_text[:30]}...",
+                phase="交付",
+            )
+        ],
     }

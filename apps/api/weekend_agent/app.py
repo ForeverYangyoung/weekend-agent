@@ -14,7 +14,9 @@ from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from weekend_agent.graph import agent_graph
+from weekend_agent.mock_meituan import mock_router
 from weekend_agent.state import AgentState
+from weekend_agent.tools.http_client import current_mode
 
 _PLAYGROUND_HTML = Path(__file__).resolve().parent / "static" / "playground.html"
 
@@ -22,9 +24,12 @@ _PLAYGROUND_HTML = Path(__file__).resolve().parent / "static" / "playground.html
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     """启动时在终端打印测试页地址，避免只打开 `/` 却以为没有网页。"""
+    mode, base = current_mode()
     print(
         "\n[weekend-agent] 浏览器流式测试: http://127.0.0.1:8000/playground\n"
-        "[weekend-agent] API 文档: http://127.0.0.1:8000/docs\n",
+        "[weekend-agent] API 文档: http://127.0.0.1:8000/docs\n"
+        f"[weekend-agent] Mock 美团: mode={mode} base_url={base} "
+        "(同进程也挂在 /mock-meituan/*, curl http://127.0.0.1:8000/mock-meituan/health 验证)\n",
         flush=True,
     )
     yield
@@ -49,6 +54,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 把假美团 API 同时挂在主服务下，方便评委直接 `curl http://127.0.0.1:8000/mock-meituan/...`
+app.include_router(mock_router, prefix="/mock-meituan")
 
 
 def _json_safe(obj: Any) -> Any:
@@ -158,12 +166,16 @@ def playground() -> FileResponse:
 @app.get("/health")
 def health() -> dict[str, str]:
     """健康检查；若响应里没有 `playground` 字段，说明进程加载的是旧代码，请重启服务并 `pip install -e .`。"""
+    mode, base = current_mode()
     return {
         "status": "ok",
         "playground": "/playground",
         "playground_shortcuts": "/ui,/ground",
         "stream": "/v1/agent/stream",
         "stream_alt": "/agent/stream",
+        "mock_meituan_mode": mode,
+        "mock_meituan_base_url": base,
+        "mock_meituan_mounted": "/mock-meituan",
     }
 
 

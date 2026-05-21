@@ -1,66 +1,59 @@
-"""DryRun 节点：根据 Plan 生成 Tool 调用清单并做"占位调用"。
+"""DryRun 节点：根据 Plan「打听」一圈（查票、查桌、查库存），不下单。
 
-占位 = 只查询 / 占座 / 校验库存，不真扣款不真锁定。
-真实 Tool 调用在 Executor 节点。下一步会接 tools/registry.py。
+现在通过 `weekend_agent.tools` 假后台真实走查询逻辑（仍是内存 Mock，不是真美团）。
 """
 from __future__ import annotations
 
-from uuid import uuid4
+from datetime import datetime
 
+from weekend_agent.roles import trace_line
 from weekend_agent.schemas import ToolCall, ToolStatus
 from weekend_agent.state import AgentState
+from weekend_agent.tools import ToolContext, ToolError, invoke, plan_to_dry_run_calls
 
 
-def _plan_to_calls(plan) -> list[ToolCall]:
-    """Plan → ToolCall 列表的简单映射。"""
-    calls: list[ToolCall] = []
-    for stage in plan.stages:
-        if stage.name == "玩":
-            calls.append(
-                ToolCall(
-                    id=f"tc_{uuid4().hex[:8]}",
-                    stage_name=stage.name,
-                    tool_name="check_activity_availability",
-                    args={"poi_id": stage.primary.poi_id, "start": stage.start_time},
-                )
-            )
-        elif stage.name == "吃":
-            calls.append(
-                ToolCall(
-                    id=f"tc_{uuid4().hex[:8]}",
-                    stage_name=stage.name,
-                    tool_name="check_table_availability",
-                    args={
-                        "poi_id": stage.primary.poi_id,
-                        "ppl": 4,
-                        "time": stage.start_time,
-                    },
-                )
-            )
-        elif stage.name == "加餐":
-            calls.append(
-                ToolCall(
-                    id=f"tc_{uuid4().hex[:8]}",
-                    stage_name=stage.name,
-                    tool_name="check_addon_stock",
-                    args={"poi_id": stage.primary.poi_id},
-                )
-            )
-    return calls
+def _run_read_call(call: ToolCall, ctx: ToolContext) -> ToolCall:
+    call.started_at = datetime.utcnow()
+    try:
+        call.result = invoke(call.tool_name, call.args, ctx=ctx, stage_name=call.stage_name)
+        # 读类：available / in_stock 为 false 也算「不能继续下单」
+        if call.tool_name == "check_table_availability" and not call.result.get("available"):
+            call.status = ToolStatus.FAILED
+            call.error = "桌位不可用"
+        elif call.tool_name == "check_addon_stock" and not call.result.get("in_stock"):
+            call.status = ToolStatus.FAILED
+            call.error = "加餐库存不足"
+        else:
+            call.status = ToolStatus.OK
+    except ToolError as e:
+        call.status = ToolStatus.FAILED
+        call.error = e.message
+        call.result = {"code": e.code, **e.details}
+    call.finished_at = datetime.utcnow()
+    return call
 
 
 def dry_run_node(state: AgentState) -> dict:
     plan = state.get("plan")
     if not plan:
-        return {"dry_run_calls": [], "trace": ["[DryRun] 跳过：无 plan"]}
+        return {
+            "dry_run_calls": [],
+            "trace": [trace_line("Executor", "跳过：无 plan", phase="预检")],
+        }
 
-    calls = _plan_to_calls(plan)
-    # Stub：默认全部 OK；下一步 registry 接入后会真调用 Mock Tool
-    for c in calls:
-        c.status = ToolStatus.OK
-        c.result = {"ok": True, "stub": True}
+    profile = state.get("group_profile")
+    people = profile.people_count if profile else 4
 
-    return {
-        "dry_run_calls": calls,
-        "trace": [f"[DryRun] 占位调用 {len(calls)} 个 Tool，全部可执行 ✓"],
-    }
+    ctx = ToolContext(force_failure_stage=state.get("force_failure"))
+    calls = [_run_read_call(c, ctx) for c in plan_to_dry_run_calls(plan, people=people)]
+
+    ok = sum(1 for c in calls if c.status == ToolStatus.OK)
+    fail = len(calls) - ok
+    msg = f"打听 {len(calls)} 项：{ok} 可执行"
+    if fail:
+        msg += f"，{fail} 不可用 ✗"
+    else:
+        msg += " ✓"
+    trace = trace_line("Executor", msg, phase="预检")
+
+    return {"dry_run_calls": calls, "trace": [trace]}

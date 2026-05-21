@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import operator
-from typing import Annotated, TypedDict
+from typing import Annotated, Any, TypedDict
 
 from weekend_agent.schemas import (
     CriticFeedback,
     GroupProfile,
     Plan,
+    ResearchResult,
     SummaryCard,
     ToolCall,
 )
@@ -17,11 +18,20 @@ class AgentState(TypedDict, total=False):
     # ── 输入 ──
     user_input: str
 
+    # 用户历史上下文（来自画像库，P0 可直接传 dict）。
+    # 典型字段：favorite_tags / tag_counts / cuisine_counts / category_counts
+    history_context: dict[str, Any]
+
     # ── Profiler 输出 ──
     group_profile: GroupProfile | None
 
+    # ── Researcher 输出 ──
+    research_result: ResearchResult | None
+
     # ── Planner 输出 ──
     plan: Plan | None
+    # Top-K 中除主选外的备选方案，按总分降序；为空说明只生成了一种顺序
+    plan_alternatives: list[Plan]
     plan_iteration: int  # 已重规划次数，触发 max_plan_iterations 兜底
 
     # ── Critic 输出 ──
