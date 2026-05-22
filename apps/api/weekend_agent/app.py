@@ -159,7 +159,6 @@ def playground() -> FileResponse:
     return FileResponse(
         _PLAYGROUND_HTML,
         media_type="text/html; charset=utf-8",
-        filename="playground.html",
     )
 
 

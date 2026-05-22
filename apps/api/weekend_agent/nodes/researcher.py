@@ -1,10 +1,8 @@
 """Researcher 节点：按画像检索每阶段 POI 候选，写入 `research_result`。"""
 
-//入口，只依赖 group_profile（从profiler节点传入）
-//输出research_result（ResearchResult），trace（list[str]）
-//ResearchResult包含所有阶段的研究结果 
-
-//trace:[Researcher] 阶段 3，候选 7 项｜默认选中：玩=奥林匹克森林公园，吃=Wagas 沙拉轻食（奥森店），加餐=原麦山丘 小蛋糕（送至餐厅）
+# 入口：只依赖 group_profile（从 profiler 节点传入）。
+# 输出：research_result（ResearchResult）与 trace（list[str]）。
+# trace 示例：[Researcher] 阶段 3，候选 6 项｜默认选中：玩=奥林匹克森林公园，吃=Wagas 沙拉轻食（奥森店），加餐=原麦山丘 小蛋糕（送至餐厅）
 
 
 from __future__ import annotations
