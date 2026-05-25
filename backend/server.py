@@ -1,4 +1,4 @@
-"""FastAPI：SSE 流式推送 Agent 状态（供前端 fetch 流式读取）。"""
+"""FastAPI：SSE 流式推送 Agent 状态 + 前端静态资源（python app.py 一把启动）。"""
 from __future__ import annotations
 
 import json
@@ -11,6 +11,7 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from backend.graph import agent_graph
@@ -20,21 +21,27 @@ from backend.tools.http_client import current_mode
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _PLAYGROUND_HTML = _PROJECT_ROOT / "frontend" / "playground.html"
+_FRONTEND_DIST = _PROJECT_ROOT / "frontend-v2" / "dist"
+_FRONTEND_ASSETS = _FRONTEND_DIST / "assets"
+
+
+FRONTEND_AVAILABLE = _FRONTEND_DIST.is_dir() and (_FRONTEND_DIST / "index.html").is_file()
 
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
-    """启动时在终端打印测试页地址。"""
+    """启动时在终端打印访问地址。"""
     mode, base = current_mode()
-    url_playground = "http://127.0.0.1:8000/playground"
-    url_docs = "http://127.0.0.1:8000/docs"
+    url = "http://127.0.0.1:8000"
     print(
-        f"\n  {'─' * 40}\n"
+        f"\n  {'─' * 45}\n"
         f"  Weekend Agent 启动成功\n"
-        f"  {'─' * 40}\n"
-        f"  浏览器测试页: {url_playground}\n"
-        f"  API 文档:     {url_docs}\n"
-        f"  {'─' * 40}\n"
+        f"  {'─' * 45}\n"
+        f"  前端页面:     {url}/\n"
+        f"  API 文档:     {url}/docs\n"
+        f"  旧版测试页:   {url}/playground\n"
+        f"  {'─' * 45}\n"
+        f"  前端来源: {'frontend-v2/dist/' if FRONTEND_AVAILABLE else 'frontend/playground.html'}\n"
         f"  Mock 美团: mode={mode} base_url={base}\n",
         flush=True,
     )
@@ -140,8 +147,13 @@ def _run_stream(req: StreamAgentRequest) -> Iterator[str]:
 
 
 @app.get("/")
-def root() -> RedirectResponse:
-    """浏览器打开服务根路径即可进入流式测试页。"""
+def root() -> FileResponse | RedirectResponse:
+    """根路径 → 新版前端（若有构建产物），否则回退到旧版测试页。"""
+    if FRONTEND_AVAILABLE:
+        return FileResponse(
+            str(_FRONTEND_DIST / "index.html"),
+            media_type="text/html; charset=utf-8",
+        )
     return RedirectResponse(url="/playground", status_code=307)
 
 
@@ -208,3 +220,11 @@ def stream_agent(req: StreamAgentRequest) -> StreamingResponse:
 def stream_agent_short_path(req: StreamAgentRequest) -> StreamingResponse:
     """与 `POST /v1/agent/stream` 行为完全一致；兼容 Swagger/前端里未带 `v1` 的路径。"""
     return _stream_agent_response(req)
+
+
+if FRONTEND_AVAILABLE:
+    app.mount("/assets", StaticFiles(directory=str(_FRONTEND_ASSETS)), name="assets")
+
+    @app.get("/favicon.svg")
+    def favicon() -> FileResponse:
+        return FileResponse(str(_FRONTEND_DIST / "favicon.svg"))
