@@ -146,7 +146,7 @@ def _run_stream(req: StreamAgentRequest) -> Iterator[str]:
         yield _sse_line({"event": "error", "message": str(e)})
 
 
-@app.get("/")
+@app.get("/", response_model=None)
 def root() -> FileResponse | RedirectResponse:
     """根路径 → 新版前端（若有构建产物），否则回退到旧版测试页。"""
     if FRONTEND_AVAILABLE:
