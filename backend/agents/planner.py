@@ -250,9 +250,53 @@ def _determine_orders(profile: GroupProfile) -> list[tuple[str, ...]]:
     except (ValueError, IndexError):
         return [("玩", "吃"), ("吃", "玩")]
 
+    # 基础规则排序
     if 11 <= start_h <= 13 or 17 <= start_h <= 19:
-        return [("吃", "玩"), ("玩", "吃")]
-    return [("玩", "吃"), ("吃", "玩")]
+        orders = [("吃", "玩"), ("玩", "吃")]
+    else:
+        orders = [("玩", "吃"), ("吃", "玩")]
+
+    # LLM 重新排序（基于更丰富的画像上下文）
+    return _llm_rank_orders(profile, orders)
+
+
+def _llm_rank_orders(
+    profile: GroupProfile, orders: list[tuple[str, ...]]
+) -> list[tuple[str, ...]]:
+    """LLM-as-a-Judge：从候选顺序中选出最优。失败时回退到规则排序。"""
+    from backend.llm_client import chat_json
+    from backend.prompts import (
+        profile_to_text,
+        rank_timeline_orders_system,
+        rank_timeline_orders_user,
+    )
+
+    result = chat_json(
+        rank_timeline_orders_system,
+        rank_timeline_orders_user.format(
+            profile_text=profile_to_text(profile),
+            candidates_text="\n".join(
+                f"  {i+1}. {' → '.join(o)}" for i, o in enumerate(orders)
+            ),
+        ),
+        temperature=0.2,
+        max_tokens=200,
+    )
+
+    if not isinstance(result, dict):
+        return orders
+
+    best = result.get("best_order", [])
+    if not isinstance(best, list) or len(best) < 2:
+        return orders
+
+    # 将 LLM 选中的顺序放在第一位，其余保持原顺序
+    best_tuple = tuple(best)
+    reordered = [best_tuple] if best_tuple in orders else []
+    for o in orders:
+        if o not in reordered:
+            reordered.append(o)
+    return reordered or orders
 
 
 def _build_plan_with_order(
@@ -784,8 +828,10 @@ def revise_plan(
     """按序应用一批 patches，全部成功后校验，返回修订后 Plan + 事件列表。
 
     原子性：任一 patch 失败则返回 (None, events)。
-    locked_stages：被锁定的阶段名列表，修订时跳过这些 target。
-    """
+    locked_stages：被锁定的阶段名列表，修订时跳过这些 target。"""
+    if profile is None:
+        from backend.agents.profiler import analyze_profile
+        profile = analyze_profile("周末出去玩")
     locked = set(locked_stages or []) | set(plan.locked_stages)
     current = deepcopy(plan)
     events: list[PlanEvent] = []

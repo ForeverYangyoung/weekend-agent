@@ -1,12 +1,24 @@
-"""Notifier 节点：生成最终的行程卡 + 给亲友的可分享文案。"""
+"""Notifier 节点：生成最终的行程卡 + 给亲友的可分享文案。
+
+LLM 优先：用 LLM 生成自然的展示文案和分享语。
+规则兜底：LLM 不可用时回退到模板渲染。
+"""
 from __future__ import annotations
 
+from backend.llm_client import chat_json, get_llm_client
+from backend.prompts import (
+    notifier_summary_card_system,
+    notifier_summary_card_user,
+    plan_to_text,
+    profile_to_text,
+)
 from backend.roles import trace_line
 from backend.schemas import SummaryCard
 from backend.state import AgentState
 
 
-def _render_markdown(plan, profile, executed, alternatives) -> str:
+def _render_fallback(plan, profile, executed, alternatives) -> SummaryCard:
+    """规则模板渲染 — LLM 不可用时的兜底。"""
     lines = [f"## {plan.summary}", ""]
     head = f"- 人数：{profile.people_count}　预计花费：约 ¥{plan.total_cost_estimate}"
     if plan.score:
@@ -36,10 +48,16 @@ def _render_markdown(plan, profile, executed, alternatives) -> str:
             lines.append(
                 f"- 方案 {i}（{order_label}，score={alt.score:.2f}，约 ¥{alt.total_cost_estimate}）：{names}"
             )
-    return "\n".join(lines)
+
+    share = _render_share_fallback(plan)
+    return SummaryCard(
+        title=plan.summary,
+        body_markdown="\n".join(lines),
+        share_text=share,
+    )
 
 
-def _render_share(plan) -> str:
+def _render_share_fallback(plan) -> str:
     if not plan.stages:
         return "搞定了，下午出发～"
     first = plan.stages[0]
@@ -48,6 +66,32 @@ def _render_share(plan) -> str:
     return (
         f"搞定了，下午 {first.start_time} 出发，先去 {first.primary.name}，"
         f"之后吃饭定在 {food_name}，美团已经下好单啦～"
+    )
+
+
+def _llm_summary_card(profile, plan) -> SummaryCard | None:
+    """LLM 生成摘要卡片。"""
+    client = get_llm_client()
+    if client is None:
+        return None
+
+    result = chat_json(
+        notifier_summary_card_system,
+        notifier_summary_card_user.format(
+            profile_text=profile_to_text(profile),
+            plan_text=plan_to_text(plan),
+        ),
+        temperature=0.6,
+        max_tokens=600,
+    )
+
+    if not isinstance(result, dict):
+        return None
+
+    return SummaryCard(
+        title=result.get("title", plan.summary),
+        body_markdown=result.get("body_markdown", ""),
+        share_text=result.get("share_text", ""),
     )
 
 
@@ -60,18 +104,20 @@ def notifier_node(state: AgentState) -> dict:
     if not plan or not profile:
         return {"trace": [trace_line("Executor", "跳过：缺 plan/profile", phase="交付")]}
 
-    card = SummaryCard(
-        title=plan.summary,
-        body_markdown=_render_markdown(plan, profile, executed, alternatives),
-        share_text=_render_share(plan),
-    )
+    # LLM 优先
+    card = _llm_summary_card(profile, plan)
 
+    # 规则兜底
+    if card is None:
+        card = _render_fallback(plan, profile, executed, alternatives)
+
+    llm_tag = " (LLM)" if get_llm_client() else ""
     return {
         "summary_card": card,
         "trace": [
             trace_line(
                 "Executor",
-                f"行程卡已生成 ✓，分享文案: {card.share_text[:30]}...",
+                f"行程卡已生成{llm_tag} ✓，{card.share_text[:40]}...",
                 phase="交付",
             )
         ],

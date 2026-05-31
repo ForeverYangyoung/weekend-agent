@@ -12,7 +12,18 @@
                                                          └─ build_plans(重新生成备选)
 ```
 
-核心原则：**规则优先，LLM 兜底**。Profiler / Critic / Revision 全部基于关键词规则，零延迟；仅在 SummaryCard 生成时调用 LLM。
+核心原则：**规则优先，LLM 增强，优雅降级**。所有模块在规则基础上叠加 LLM 增强，LLM 不可用时自动回退到规则。`USE_LLM=true/false` 作为总开关，各模块独立检查 `get_llm_client() is not None`。
+
+### LLM 集成矩阵
+
+| 模块 | LLM 角色 | 触发时机 | 失败策略 |
+|------|---------|---------|---------|
+| **Planner** `_llm_rank_orders` | 排序候选阶段顺序（先吃后玩 vs 先玩后吃），结合场景/时间窗选出最合理的顺序 | 每次生成方案时 | 回退到规则排序（家庭→玩吃，朋友→吃玩） |
+| **Critic** `_llm_review` | 从"人的感受"角度评审方案（节奏/衔接/场景匹配），产出体验类 issue | 每次校验方案时（规则检查之后） | 回退到纯规则检查（饮食/兴趣/阶段数） |
+| **Revision** `_llm_parse` | 解析无法用关键词匹配的模糊反馈（如"感觉不太对"）为 PlanPatch | 关键词规则零命中时（fallback） | 返回空 patches，前端提示用户换种说法 |
+| **Notifier** `_llm_summary_card` | 生成自然的行程卡 title/body/share_text，比模板更贴近用户语境 | 每次生成最终交付时 | 回退到 Markdown 模板渲染（`_render_fallback`） |
+
+**调用封装**：所有 LLM 调用通过 `backend/llm_client.py` 的 `chat_json()` 统一处理（system/user prompt → JSON 解析 → markdown 代码块剥离 → 失败返回 None）。
 
 状态机基于 LangGraph，9 个节点通过 `AgentState` TypedDict 传递上下文。整个管线同步执行，mock 美团通过 ASGI 内联（零端口）或 TCP 切换。
 

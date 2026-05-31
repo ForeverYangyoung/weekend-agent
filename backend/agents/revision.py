@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import re
 
+from backend.llm_client import chat_json
+from backend.prompts import plan_to_text, revision_agent_system, revision_agent_user
+
 from backend.planner.constants import ADDON_AFTER, ADDON_BETWEEN
 from backend.schemas import Plan, PlanPatch
 
@@ -95,6 +98,42 @@ def _split_clauses(text: str) -> list[str]:
     return [s.strip() for s in re.split(r"[，,。；;、]", text) if s.strip()]
 
 
+def _llm_parse(feedback: str, plan: Plan | None) -> list[PlanPatch]:
+    """LLM fallback：关键词零命中时用大模型解析用户反馈。"""
+    result = chat_json(
+        revision_agent_system,
+        revision_agent_user.format(
+            plan_text=plan_to_text(plan) if plan else "无方案信息",
+            feedback=feedback,
+        ),
+        temperature=0.2,
+        max_tokens=500,
+    )
+
+    if not isinstance(result, list):
+        return []
+
+    patches: list[PlanPatch] = []
+    for item in result:
+        if not isinstance(item, dict):
+            continue
+        target = item.get("target")
+        action = item.get("action")
+        if target not in ("play", "food", "addon", "route"):
+            continue
+        if action not in ("replace", "insert", "remove", "reorder", "lock"):
+            continue
+        patches.append(
+            PlanPatch(
+                target=target,
+                action=action,
+                constraints=item.get("constraints", []) or [],
+                category=item.get("category"),
+            )
+        )
+    return patches
+
+
 def parse_feedback_to_patches(
     feedback: str,
     plan: Plan | None = None,
@@ -115,12 +154,11 @@ def parse_feedback_to_patches(
         target = _find_target(clause)
 
         if action is None and target is None:
-            # 无关键词命中 — 整句尝试整体解析
-            action = _find_action(feedback)
-            target = _find_target(feedback)
-            if action is None:
-                # LLM fallback would go here, but for P0: skip
-                continue
+            # 无关键词命中 — LLM fallback
+            llm_patches = _llm_parse(feedback, plan)
+            if llm_patches:
+                patches.extend(llm_patches)
+            continue
 
         if action is None:
             action = "replace"  # 默认：提到目标但没说动作 = 想换
