@@ -8,7 +8,6 @@ from backend.schemas import (
     CriticFeedback,
     GroupProfile,
     Plan,
-    ResearchResult,
     SummaryCard,
     ToolCall,
 )
@@ -24,15 +23,6 @@ class AgentState(TypedDict, total=False):
 
     # ── Profiler 输出 ──
     group_profile: GroupProfile | None
-
-    # ── Researcher 初搜输出 ──
-    research_result: ResearchResult | None
-
-    # ── Planner 输出的顺路活动搜索需求 ──
-    targeted_search_requests: list[dict]
-
-    # ── Researcher 精准搜输出 ──
-    targeted_research_result: ResearchResult | None
 
     # ── Planner 输出 ──
     plan: Plan | None
@@ -59,3 +49,10 @@ class AgentState(TypedDict, total=False):
 
     # ── Demo 专用：注入某阶段下单失败，用于演示补偿链 ──
     force_failure: str | None
+
+    # ── Revision（方案修订）──
+    user_feedback: str  # 当前轮用户反馈；空字符串 = 无反馈
+    revision_round: int  # 修订轮次计数器，初始 0
+    revision_patches: list[dict]  # 序列化的 list[PlanPatch]
+    plan_snapshots: Annotated[list[dict], operator.add]  # 累积 PlanSnapshot
+    plan_events: Annotated[list[dict], operator.add]  # 累积 PlanEvent

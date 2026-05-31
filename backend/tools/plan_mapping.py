@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+from backend.planner.constants import READ_TOOL, READ_TO_WRITE
 from backend.schemas import Plan, ToolCall
 
 
@@ -10,46 +11,21 @@ def plan_to_dry_run_calls(plan: Plan, *, people: int = 4) -> list[ToolCall]:
     """根据方案每个阶段，生成对应的「只查询、不下单」Tool。"""
     calls: list[ToolCall] = []
     for stage in plan.stages:
+        tool_name = READ_TOOL.get(stage.name)
+        if tool_name is None:
+            continue
+
+        args: dict = {"poi_id": stage.primary.poi_id}
         if stage.name == "玩":
-            calls.append(
-                ToolCall(
-                    id=f"tc_{uuid4().hex[:8]}",
-                    stage_name=stage.name,
-                    tool_name="check_activity_availability",
-                    args={
-                        "poi_id": stage.primary.poi_id,
-                        "start": stage.start_time,
-                    },
-                )
-            )
+            args["start"] = stage.start_time
         elif stage.name == "吃":
-            calls.append(
-                ToolCall(
-                    id=f"tc_{uuid4().hex[:8]}",
-                    stage_name=stage.name,
-                    tool_name="check_table_availability",
-                    args={
-                        "poi_id": stage.primary.poi_id,
-                        "people": people,
-                        "time": stage.start_time,
-                    },
-                )
-            )
-        elif stage.name == "加餐":
-            calls.append(
-                ToolCall(
-                    id=f"tc_{uuid4().hex[:8]}",
-                    stage_name=stage.name,
-                    tool_name="check_addon_stock",
-                    args={"poi_id": stage.primary.poi_id},
-                )
-            )
+            args["people"] = people
+            args["time"] = stage.start_time
+
+        calls.append(ToolCall(
+            id=f"tc_{uuid4().hex[:8]}",
+            stage_name=stage.name,
+            tool_name=tool_name,
+            args=args,
+        ))
     return calls
-
-
-# DryRun 的「打听」→ Executor 的「真下单」
-READ_TO_WRITE_TOOL: dict[str, str] = {
-    "check_activity_availability": "buy_ticket",
-    "check_table_availability": "book_table",
-    "check_addon_stock": "order_addon",
-}

@@ -103,9 +103,17 @@ def _ensure_ok(resp: httpx.Response) -> dict[str, Any]:
 # ─────────────────────────── 高层 API（供 Researcher / registry 用） ───────────────────────────
 
 
-def search_poi(*, scene: str, stage: str, limit: int = 10) -> list[dict[str, Any]]:
-    """GET /poi/search → 返回候选 dict 列表（dict 字段对齐 POICandidate）。"""
-    resp = _request("GET", "/poi/search", params={"scene": scene, "stage": stage, "limit": limit})
+def search_poi(
+    *, scene: str, stage: str, limit: int = 10, category: str | None = None
+) -> list[dict[str, Any]]:
+    """GET /poi/search → 返回候选 dict 列表（dict 字段对齐 POICandidate）。
+
+    category 非空时，mock 后端优先返回品类匹配的 POI。
+    """
+    params: dict[str, Any] = {"scene": scene, "stage": stage, "limit": limit}
+    if category:
+        params["category"] = category
+    resp = _request("GET", "/poi/search", params=params)
     body = _ensure_ok(resp)
     return list(body.get("items", []))
 

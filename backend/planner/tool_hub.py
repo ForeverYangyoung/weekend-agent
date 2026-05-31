@@ -13,8 +13,8 @@
 import time
 from typing import Optional
 
-from planner.llm_wrapper import LLMClient
-from planner.retriever import (
+from backend.planner.llm_wrapper import LLMClient
+from backend.planner.retriever import (
     check_queue,
     check_table,
     get_poi_detail,
@@ -22,7 +22,7 @@ from planner.retriever import (
     get_weather,
     search_poi,
 )
-from planner.state import (
+from backend.planner.state import (
     EnrichedPOI,
     POI,
     RouteResult,
@@ -30,7 +30,7 @@ from planner.state import (
     TransportMode,
     WeatherResult,
 )
-from planner.trace import TraceLogger
+from backend.planner.trace import TraceLogger
 
 
 # ── 配置 ──────────────────────────────────────────────

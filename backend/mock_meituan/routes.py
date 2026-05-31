@@ -43,8 +43,9 @@ def poi_search(
     scene: str = Query("family", description="family / friends / couple / solo"),
     stage: str = Query(..., description="玩 / 吃 / 加餐"),
     limit: int = Query(10, ge=1, le=50),
+    category: str | None = Query(None, description="品类过滤，如 奶茶/咖啡/火锅/日料"),
 ) -> dict[str, Any]:
-    items = catalog.search(scene=scene, stage=stage, limit=limit)
+    items = catalog.search(scene=scene, stage=stage, limit=limit, category=category)
     return {"scene": scene, "stage": stage, "count": len(items), "items": items}
 
 

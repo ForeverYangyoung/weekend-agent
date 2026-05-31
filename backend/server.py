@@ -139,6 +139,8 @@ def _run_stream(req: StreamAgentRequest) -> Iterator[str]:
                     "failed": len(last.get("failed_calls", []) or []),
                 },
                 "summary_card": _json_safe(last.get("summary_card")),
+                "plan": _json_safe(last.get("plan")),
+                "plan_alternatives": _json_safe(last.get("plan_alternatives")),
             }
         )
         yield _sse_line({"event": "done"})
@@ -220,6 +222,82 @@ def stream_agent(req: StreamAgentRequest) -> StreamingResponse:
 def stream_agent_short_path(req: StreamAgentRequest) -> StreamingResponse:
     """与 `POST /v1/agent/stream` 行为完全一致；兼容 Swagger/前端里未带 `v1` 的路径。"""
     return _stream_agent_response(req)
+
+
+class RevisePlanRequest(BaseModel):
+    plan: dict = Field(..., description="当前 Plan 的 JSON 序列化")
+    profile: dict = Field(..., description="当前 GroupProfile 的 JSON 序列化")
+    feedback: str = Field(..., min_length=1, max_length=2000)
+    revision_round: int = 0
+    revision_history: list[dict] = Field(default_factory=list)
+    locked_stages: list[str] = Field(default_factory=list)
+
+
+@app.post("/v1/plan/revise")
+def revise_plan_endpoint(req: RevisePlanRequest):
+    """接收用户反馈，返回修订后的方案（不执行）。
+
+    无状态设计：前端发送当前 Plan + Profile + feedback，服务端运行修订管线。
+    """
+    from datetime import datetime
+
+    from backend.agents.planner import revise_plan
+    from backend.agents.revision import parse_feedback_to_patches
+    from backend.schemas import Plan as PlanModel, GroupProfile, PlanSnapshot
+
+    plan = PlanModel(**req.plan)
+    profile = GroupProfile(**req.profile)
+    feedback = req.feedback.strip()
+
+    # 合并锁定阶段
+    locked = list(set(req.locked_stages) | set(plan.locked_stages))
+
+    patches = parse_feedback_to_patches(feedback, plan)
+    revised, events = revise_plan(plan, patches, profile, locked_stages=locked)
+
+    rnd = req.revision_round + 1
+    now = datetime.utcnow().isoformat()
+
+    before_snapshot = PlanSnapshot(
+        version=plan.version,
+        plan=plan,
+        created_at=now,
+        parent_version=None,
+        event_summary=feedback,
+    )
+
+    snapshots = [before_snapshot.model_dump(mode="json")]
+    event_dicts = [e.model_dump(mode="json") for e in events]
+
+    if revised:
+        after_snapshot = PlanSnapshot(
+            version=revised.version,
+            plan=revised,
+            created_at=now,
+            parent_version=plan.version,
+            event_summary="; ".join(e.summary for e in events),
+        )
+        snapshots.append(after_snapshot.model_dump(mode="json"))
+
+    # 重新生成备选方案（排除已修订方案的 POI，确保多样性）
+    alternative_plans: list[dict] = []
+    if revised:
+        from backend.agents.planner import build_plans as rebuild_plans
+        blocked_ids = {s.primary.poi_id for s in revised.stages}
+        blocked_ids.discard(None)
+        alt_plans = rebuild_plans(profile, blocked_ids, top_k=2)
+        alternative_plans = [p.model_dump(mode="json") for p in alt_plans]
+
+    return {
+        "updated_plan": revised.model_dump(mode="json") if revised else req.plan,
+        "status": "applied" if revised else "rejected",
+        "revision_round": rnd,
+        "plan_snapshots": snapshots,
+        "plan_events": event_dicts,
+        "patches_applied": len(patches) if revised else 0,
+        "locked_stages": locked,
+        "alternative_plans": alternative_plans,
+    }
 
 
 if FRONTEND_AVAILABLE:

@@ -11,8 +11,8 @@ from uuid import uuid4
 from backend.roles import trace_line
 from backend.schemas import ToolCall, ToolStatus
 from backend.state import AgentState
+from backend.planner.constants import READ_TO_WRITE
 from backend.tools import ToolContext, ToolError, invoke
-from backend.tools.plan_mapping import READ_TO_WRITE_TOOL
 
 
 def _run_write_call(
@@ -21,10 +21,10 @@ def _run_write_call(
     ctx: ToolContext,
     idempotency_key: str,
 ) -> ToolCall:
-    write_name = READ_TO_WRITE_TOOL.get(dry.tool_name, dry.tool_name)
+    write_name = READ_TO_WRITE.get(dry.tool_name, dry.tool_name)
     args = dict(dry.args)
     args["idempotency_key"] = idempotency_key
-    if write_name == "buy_ticket":
+    if write_name == READ_TO_WRITE["check_activity_availability"]:
         args.setdefault("count", args.get("people", 2))
 
     call = ToolCall(

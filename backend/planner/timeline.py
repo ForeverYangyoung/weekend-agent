@@ -5,7 +5,7 @@
 第三步：把选中的顺序串成 TimelineSkeleton。
 """
 
-from planner.state import (
+from backend.planner.state import (
     StageType,
     TimeSegment,
     TimelineSkeleton,

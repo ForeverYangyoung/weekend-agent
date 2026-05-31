@@ -16,7 +16,7 @@ import json
 import os
 from typing import Optional
 
-from planner.state import (
+from backend.planner.state import (
     Combo,
     InsertableBehavior,
     RouteInsertion,
@@ -35,10 +35,10 @@ class LLMClient:
         model: str = "qwen-plus",
     ):
         self.api_key = api_key or os.getenv(
-            "QWEN_API_KEY", "sk-gqmotF1H7foQGCJkGkRyyy0NwvaUSaSoc6F0GfjpSdLPjfMV"
+            "OPENAI_API_KEY", "sk-2d936f19e3e74a6582d969410bdf9506"
         )
         self.base_url = base_url or os.getenv(
-            "QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            "OPENAI_BASE_URL", "https://api.deepseek.com/v1"
         )
         self.model = model
 

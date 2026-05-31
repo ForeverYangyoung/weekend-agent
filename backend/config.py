@@ -19,6 +19,14 @@ class Settings(BaseSettings):
 
     use_llm: bool = False
     max_plan_iterations: int = 3
+    max_revision_rounds: int = 5
+
+    # 搜索轮次上限（Reflect Loop 硬限制）
+    max_search_rounds: int = 2
+    # 提前停止：候选 POI 数达到即停
+    early_stop_poi_count: int = 15
+    # 提前停止：候选方案数达到即停
+    early_stop_plan_count: int = 10
 
 
 @lru_cache(maxsize=1)

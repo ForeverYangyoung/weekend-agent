@@ -3,9 +3,36 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+
+# ─────────────────────────── 搜索策略 ───────────────────────────
+
+
+class SearchStrategy(BaseModel):
+    """Profiler 产出的搜索策略，Planner 依此检索 POI。"""
+
+    play_categories: list[str] = Field(default_factory=list)
+    food_categories: list[str] = Field(default_factory=list)
+    optional_categories: list[str] = Field(default_factory=list)
+    avoid_categories: list[str] = Field(default_factory=list)
+
+
+# ─────────────────────────── 群体行为特征偏好 ───────────────────────────
+
+
+class PlanningPreferences(BaseModel):
+    """群体行为特征 — 纯画像层，描述"怎么选"而非"选什么"。
+
+    不包含具体搜索类别（那是 Strategy Builder 的职责）。
+    只描述群体的风格偏好，供 Planner 的打分/过滤/排序使用。
+    """
+
+    restaurant_style: list[str] = Field(default_factory=list)
+    activity_style: list[str] = Field(default_factory=list)
+    route_style: list[str] = Field(default_factory=list)
 
 
 # ─────────────────────────── 群体画像 ───────────────────────────
@@ -53,6 +80,10 @@ class GroupProfile(BaseModel):
     evidence: list[ProfileEvidence] = Field(default_factory=list)
     # 历史偏好权重（来自 history_context），0~1，越大越喜欢
     history_weights: dict[str, float] = Field(default_factory=dict)
+    # 群体行为特征偏好，供 Planner 的打分/过滤/排序使用
+    planning_preferences: PlanningPreferences = Field(default_factory=PlanningPreferences)
+    # Profiler 产出的搜索策略，Planner 依此检索 POI
+    search_strategy: SearchStrategy | None = None
 
 
 # ─────────────────────────── 打分明细 ───────────────────────────
@@ -106,24 +137,50 @@ class Plan(BaseModel):
     score: float = 0.0
     # 阶段顺序，例如 "玩→吃→加餐" / "吃→玩→加餐"，给评委展示「试过多种顺序」
     order_label: str = ""
+    # 硬约束校验结果（validator 产出），None 表示未校验
+    validation: Any | None = Field(default=None, exclude=True)
+    # 修订版本号，初始为 1
+    version: int = 1
+    # 被锁定的阶段名列表，修订时跳过这些阶段
+    locked_stages: list[str] = Field(default_factory=list)
 
 
-# ─────────────────────────── Researcher 输出 ───────────────────────────
+# ─────────────────────────── 方案修订 ───────────────────────────
 
 
-class ResearchStageResult(BaseModel):
-    """单个阶段（玩/吃/加餐）的检索结果。"""
+class PlanPatch(BaseModel):
+    """单条修订补丁。从用户反馈中解析出的结构化修改意图。"""
 
-    stage_name: str
-    candidates: list[POICandidate] = Field(default_factory=list)
-    selected: POICandidate | None = None
+    target: Literal["play", "food", "addon", "route"]
+    action: Literal["replace", "insert", "remove", "reorder", "lock"]
+    constraints: list[str] = Field(default_factory=list)
+    category: str | None = None
 
 
-class ResearchResult(BaseModel):
-    """Researcher 节点输出：分阶段 POI 候选 + 工具调用追踪。"""
+class PlanSnapshot(BaseModel):
+    """方案的不可变快照，每次修订产出一个新版本，支持版本回溯。"""
 
-    stages: list[ResearchStageResult] = Field(default_factory=list)
-    tool_trace: list[str] = Field(default_factory=list)
+    version: int
+    plan: Plan
+    created_at: str = ""
+    parent_version: int | None = None
+    event_summary: str = ""
+
+
+class PlanEvent(BaseModel):
+    """用户可见的变更事件，前端渲染为 ✓ 列表。"""
+
+    event_type: Literal[
+        "plan_created",
+        "stage_replaced",
+        "stage_inserted",
+        "stage_removed",
+        "stages_reordered",
+        "stage_locked",
+    ]
+    summary: str
+    timestamp: str = ""
+    version: int = 0
 
 
 # ─────────────────────────── Critic 反馈 ───────────────────────────

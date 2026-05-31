@@ -1,4 +1,4 @@
-import type { SSEEvent } from './types'
+import type { RevisePlanRequest, RevisePlanResponse, SSEEvent } from './types'
 
 export async function* streamAgent(
   userInput: string,
@@ -33,9 +33,24 @@ export async function* streamAgent(
       if (!line.startsWith('data: ')) continue
       try {
         yield JSON.parse(line.slice(6)) as SSEEvent
-      } catch {
-        // skip parse errors
+      } catch (err) {
+        console.warn('SSE parse error', { linePreview: line.slice(6, 200), error: String(err) })
       }
     }
   }
+}
+
+export async function revisePlan(req: RevisePlanRequest): Promise<RevisePlanResponse> {
+  const res = await fetch('/v1/plan/revise', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`${res.status} ${text}`)
+  }
+
+  return res.json() as Promise<RevisePlanResponse>
 }

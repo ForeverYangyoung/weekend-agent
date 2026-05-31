@@ -11,7 +11,8 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from backend.schemas import EditableTag, GroupProfile, ProfileEvidence
+from backend.planner.strategy_builder import build_search_strategy
+from backend.schemas import EditableTag, GroupProfile, PlanningPreferences, ProfileEvidence
 
 # ─────────────────────────── 关键词表 ───────────────────────────
 
@@ -67,6 +68,63 @@ _BUDGET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(\d+)\s*(?:元|块)?\s*/\s*人"), "元/人"),
 )
 
+
+# ── 群体行为特征：场景 → 风格偏好默认值 ──
+
+_SCENE_STYLE_DEFAULTS: dict[str, dict[str, list[str]]] = {
+    "family": {
+        "restaurant_style": ["family_friendly", "value_for_money", "low_wait_time", "safe_dining"],
+        "activity_style": ["kid_friendly", "safe", "educational", "hands_on"],
+        "route_style": ["efficient", "minimal_walking", "rest_stops_available"],
+    },
+    "friends": {
+        "restaurant_style": ["social_gathering", "casual", "trendy", "value_for_money"],
+        "activity_style": ["social", "immersive", "group_friendly", "fun_oriented"],
+        "route_style": ["flexible", "clustered", "transit_friendly"],
+    },
+    "couple": {
+        "restaurant_style": ["romantic", "photogenic", "private", "fine_dining"],
+        "activity_style": ["romantic", "photogenic", "immersive", "ritual_oriented"],
+        "route_style": ["scenic", "leisurely", "photogenic", "walkable"],
+    },
+    "solo": {
+        "restaurant_style": ["casual", "quick", "value_for_money", "solo_friendly"],
+        "activity_style": ["relaxed", "self_paced", "contemplative", "flexible"],
+        "route_style": ["efficient", "flexible", "walkable"],
+    },
+}
+
+# ── 文本关键词增强：在场景默认值之上追加的风格标签 ──
+
+_STYLE_HINTS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
+    "restaurant_style": (
+        ("低卡", ("healthy", "light_fare")),
+        ("减肥", ("healthy", "light_fare")),
+        ("小资", ("trendy", "photogenic")),
+        ("网红", ("trendy", "photogenic")),
+        ("安静", ("quiet", "private")),
+        ("包间", ("private",)),
+        ("快餐", ("quick", "casual")),
+    ),
+    "activity_style": (
+        ("拍照", ("photogenic",)),
+        ("打卡", ("photogenic", "trendy")),
+        ("安静", ("contemplative", "relaxed")),
+        ("刺激", ("adventurous",)),
+        ("学习", ("educational",)),
+        ("动手", ("hands_on",)),
+        ("出片", ("photogenic",)),
+        ("仪式感", ("ritual_oriented",)),
+    ),
+    "route_style": (
+        ("随便逛", ("flexible", "walkable")),
+        ("不赶时间", ("leisurely",)),
+        ("一条线", ("efficient", "clustered")),
+        ("不绕", ("efficient", "clustered")),
+        ("风景", ("scenic",)),
+        ("拍照", ("photogenic", "scenic")),
+    ),
+}
 
 # ─────────────────────────── 工具函数 ───────────────────────────
 
@@ -222,6 +280,64 @@ def _infer_budget(text: str) -> tuple[int | None, float, str]:
         if m:
             return int(m.group(1)), 0.9, f"{label}={m.group(0)}"
     return None, 0.4, ""
+
+
+def _infer_planning_preferences(
+    text: str,
+    scene: str,
+    kids_ages: list[int],
+    dietary: list[str],
+    interests: list[str],
+) -> PlanningPreferences:
+    """场景默认值 + 文本关键词增强 → PlanningPreferences。
+
+    不涉及具体搜索类别；只描述群体的行为风格偏好。
+    """
+    defaults = _SCENE_STYLE_DEFAULTS.get(scene, _SCENE_STYLE_DEFAULTS["solo"])
+    result: dict[str, list[str]] = {
+        k: list(v) for k, v in defaults.items()
+    }
+
+    # 文本关键词增强
+    for dim in ("restaurant_style", "activity_style", "route_style"):
+        for kw, tags in _STYLE_HINTS.get(dim, ()):
+            if kw in text:
+                for t in tags:
+                    if t not in result[dim]:
+                        result[dim].append(t)
+
+    # 幼儿增强：有 ≤5 岁孩子 → 强化安全/低等待/休息站
+    if kids_ages and min(kids_ages) <= 5:
+        for tag, dim in [
+            ("safe_dining", "restaurant_style"),
+            ("low_wait_time", "restaurant_style"),
+            ("safe", "activity_style"),
+            ("rest_stops_available", "route_style"),
+        ]:
+            if tag not in result[dim]:
+                result[dim].append(tag)
+
+    # 饮食偏好增强
+    if "低卡" in dietary:
+        for tag in ("healthy", "light_fare"):
+            if tag not in result["restaurant_style"]:
+                result["restaurant_style"].append(tag)
+
+    # 兴趣增强
+    if "亲子" in interests:
+        for tag in ("kid_friendly", "educational"):
+            if tag not in result["activity_style"]:
+                result["activity_style"].append(tag)
+    if "户外" in interests:
+        for tag in ("outdoor", "scenic"):
+            if tag not in result["activity_style"]:
+                result["activity_style"].append(tag)
+
+    return PlanningPreferences(
+        restaurant_style=result["restaurant_style"],
+        activity_style=result["activity_style"],
+        route_style=result["route_style"],
+    )
 
 
 # ─────────────────────────── 历史偏好融合 ───────────────────────────
@@ -494,6 +610,13 @@ def analyze_profile(
                 confidence=bud_conf, source="utterance",
             )
         )
+
+    planning_prefs = _infer_planning_preferences(
+        text, scene, profile.kids_ages, profile.dietary, profile.interests,
+    )
+    profile.planning_preferences = planning_prefs
+
+    profile.search_strategy = build_search_strategy(profile)
 
     has_history = bool(history_context)
     if has_history:

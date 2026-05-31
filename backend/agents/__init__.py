@@ -7,17 +7,16 @@ from backend.agents.planner import (
     build_family_stub,
     build_friends_stub,
     build_plans,
-    suggest_insertions,
+    revise_plan,
 )
 from backend.agents.profiler import analyze_profile
-from backend.agents.researcher import run_initial_research, run_targeted_research
+from backend.agents.revision import parse_feedback_to_patches
 
 __all__ = [
     "analyze_profile",
     "build_family_stub",
     "build_friends_stub",
     "build_plans",
-    "run_initial_research",
-    "run_targeted_research",
-    "suggest_insertions",
+    "parse_feedback_to_patches",
+    "revise_plan",
 ]

@@ -3,7 +3,7 @@
 两段式组合 + 边组边剪枝 + 贪心兜底（02 文档 §4.1 步骤 4）。
 """
 
-from planner.state import (
+from backend.planner.state import (
     Combo,
     EnrichedPOI,
     POI,

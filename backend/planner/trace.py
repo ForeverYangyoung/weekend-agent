@@ -16,7 +16,7 @@ import time
 from contextlib import contextmanager
 from typing import Any, Optional
 
-from planner.state import ToolTrace
+from backend.planner.state import ToolTrace
 
 
 class TraceSpan:

@@ -6,21 +6,24 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from backend.planner.constants import READ_TOOL
 from backend.roles import trace_line
 from backend.schemas import ToolCall, ToolStatus
 from backend.state import AgentState
 from backend.tools import ToolContext, ToolError, invoke, plan_to_dry_run_calls
+
+_CHECK_TABLE = READ_TOOL["吃"]
+_CHECK_ADDON = READ_TOOL["加餐"]
 
 
 def _run_read_call(call: ToolCall, ctx: ToolContext) -> ToolCall:
     call.started_at = datetime.utcnow()
     try:
         call.result = invoke(call.tool_name, call.args, ctx=ctx, stage_name=call.stage_name)
-        # 读类：available / in_stock 为 false 也算「不能继续下单」
-        if call.tool_name == "check_table_availability" and not call.result.get("available"):
+        if call.tool_name == _CHECK_TABLE and not call.result.get("available"):
             call.status = ToolStatus.FAILED
             call.error = "桌位不可用"
-        elif call.tool_name == "check_addon_stock" and not call.result.get("in_stock"):
+        elif call.tool_name == _CHECK_ADDON and not call.result.get("in_stock"):
             call.status = ToolStatus.FAILED
             call.error = "加餐库存不足"
         else:

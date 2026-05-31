@@ -8,7 +8,7 @@ from typing import Optional
 
 import requests
 
-from planner.state import (
+from backend.planner.state import (
     EnrichedPOI,
     POI,
     RouteResult,

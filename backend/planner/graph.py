@@ -13,24 +13,25 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from typing import TYPE_CHECKING
 
-from planner.composer import generate_combinations
-from planner.filters import apply_stage_filters
-from planner.llm_wrapper import (
+from backend.planner.composer import generate_combinations
+from backend.planner.filters import apply_stage_filters
+from backend.planner.insertion_engine import filter_insertions
+from backend.planner.llm_wrapper import (
     LLMClient,
     generate_summary,
     judge_route_insertions,
     rank_timeline_orders,
 )
-from planner.state import (
+from backend.planner.state import (
     INSERTABLE_CATALOG,
     PlannerState,
     TimelineSkeleton,
     UserProfile,
     create_initial_state,
 )
-from planner.timeline import build_skeleton_from_order, enumerate_candidate_orders
-from planner.tool_hub import ToolHub
-from planner.trace import TraceLogger
+from backend.planner.timeline import build_skeleton_from_order, enumerate_candidate_orders
+from backend.planner.tool_hub import ToolHub
+from backend.planner.trace import TraceLogger
 
 # ── 循环上限（01 文档 NFR + 02 文档 §4.4） ───────────
 
@@ -110,12 +111,22 @@ class PlannerEngine:
         # ── Step 4-6: 打分 Agent（规则 + 地理凝聚力 + pairwise 校准）──
         scored = self.scorer.full_pipeline(combos, profile)
 
-        # ── Step 7: 顺路插入 ──
+        # ── Step 7: 顺路插入（规则预筛 → LLM 仅生成 display 文案）──
         top = scored[:2]
         if self.llm.api_key:
+            budget = (
+                profile.budget_per_person.min
+                if profile.budget_per_person
+                else None
+            )
+            filtered_catalog = filter_insertions(
+                INSERTABLE_CATALOG,
+                scene=profile.mode,
+                budget_per_person=budget,
+            )
             for plan in top:
                 plan.insertions = judge_route_insertions(
-                    plan, profile, INSERTABLE_CATALOG, self.llm
+                    plan, profile, filtered_catalog, self.llm
                 )
 
         # ── Step 8: Top-2 摘要 ──

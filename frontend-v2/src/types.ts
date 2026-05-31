@@ -6,50 +6,98 @@ export interface SSEEvent {
   state?: AgentStatePayload
   summary?: SummaryPayload
   summary_card?: SummaryCard
+  /** Included in final event as fallback in case state events are dropped */
+  plan?: PlanData
+  plan_alternatives?: PlanData[]
   message?: string
 }
 
 export interface AgentStatePayload {
   user_input?: string
   trace?: string[]
-  group_profile?: {
-    scene?: string
-    people_count?: number
-    kids_ages?: number[]
-    start_time?: string
-    duration_h?: number
-    distance_limit_km?: number
-    dietary_tags?: string[]
-    interests?: string[]
-    budget?: string
-    [key: string]: unknown
-  }
-  plans?: PlanPayload[]
+  group_profile?: Record<string, unknown>
+  plan?: PlanData
+  plan_alternatives?: PlanData[]
   plan_iteration?: number
   executed_calls?: unknown[]
   failed_calls?: unknown[]
 }
 
-export interface PlanPayload {
-  stage_order?: string[]
-  play?: PlanStage
-  eat?: PlanStage
-  addon?: PlanStage
-  total_budget?: number
-  score?: number
+// ── Real backend Plan model (matches backend/schemas.py Plan) ──
+
+export interface PlanData {
+  summary: string
+  stages: PlanStageData[]
+  total_duration_hours: number
+  total_cost_estimate: number
+  score: number
+  order_label: string
+  version: number
+  locked_stages: string[]
 }
 
-export interface PlanStage {
-  poi_name?: string
-  poi_id?: string
-  category?: string
-  booking_ref?: string
-  price?: number
-  lat?: number
-  lng?: number
-  tags?: string[]
-  duration_min?: number
+export interface PlanStageData {
+  name: string // "玩" / "吃" / "加餐" / "通勤"
+  start_time: string
+  end_time: string
+  primary: POICandidateData
+  backups: POICandidateData[]
+  notes: string
 }
+
+export interface POICandidateData {
+  poi_id: string
+  name: string
+  category: string
+  score: number
+  reason: string
+  metadata: Record<string, unknown>
+}
+
+// ── Revision types (matches backend/schemas.py) ──
+
+export interface PlanPatch {
+  target: 'play' | 'food' | 'addon' | 'route'
+  action: 'replace' | 'insert' | 'remove' | 'reorder' | 'lock'
+  constraints: string[]
+  category?: string | null
+}
+
+export interface PlanEvent {
+  event_type:
+    | 'plan_created'
+    | 'stage_replaced'
+    | 'stage_inserted'
+    | 'stage_removed'
+    | 'stages_reordered'
+    | 'stage_locked'
+  summary: string
+  timestamp: string
+  version: number
+}
+
+export interface RevisePlanRequest {
+  plan: Record<string, unknown>
+  profile: Record<string, unknown>
+  feedback: string
+  revision_round: number
+  revision_history: Record<string, unknown>[]
+  locked_stages: string[]
+}
+
+export interface RevisePlanResponse {
+  updated_plan: Record<string, unknown>
+  status: 'applied' | 'rejected'
+  revision_round: number
+  plan_snapshots: Record<string, unknown>[]
+  plan_events: PlanEvent[]
+  patches_applied: number
+  locked_stages: string[]
+  /** Regenerated alternative plans (different POIs from revised plan) */
+  alternative_plans: Record<string, unknown>[]
+}
+
+// ── Summary ──
 
 export interface SummaryPayload {
   scene?: string
@@ -64,7 +112,8 @@ export interface SummaryCard {
   body_markdown?: string
 }
 
-/** Frontend message model for the chat UI */
+// ── Frontend display models ──
+
 export interface ChatMessage {
   id: string
   role: 'ai' | 'user'
@@ -73,18 +122,47 @@ export interface ChatMessage {
   plans?: DisplayPlan[]
   progressSteps?: ProgressStep[]
   preferences?: PreferenceState
+  planEvents?: PlanEvent[]
   timestamp: number
 }
 
 export interface DisplayPlan {
   id: string
   title: string
-  play: { name: string; time: string; desc: string; tags: string[] }
-  eat: { name: string; time: string; desc: string; tags: string[] }
-  addon?: { name: string; desc: string; tags: string[] }
+  play: DisplayStage
+  eat: DisplayStage
+  addon?: DisplayStage
+  /** Computed transit segments between stages */
+  transits: DisplayTransit[]
   totalPrice: string
   score: number
   highlights: string[]
+  lockedStages: string[]
+  version: number
+  /** Raw backend plan — kept for revision API calls */
+  rawPlan: Record<string, unknown>
+}
+
+export interface DisplayStage {
+  name: string
+  time: string
+  startTime: string
+  endTime: string
+  desc: string
+  tags: string[]
+  /** POI metadata: distance_km, avg_price, open_hours, etc. */
+  meta?: Record<string, unknown>
+}
+
+export interface DisplayTransit {
+  from: string
+  to: string
+  startTime: string
+  endTime: string
+  durationMin: number
+  distanceKm?: number
+  mode: string
+  note?: string
 }
 
 export interface ProgressStep {

@@ -40,13 +40,14 @@ def _render_markdown(plan, profile, executed, alternatives) -> str:
 
 
 def _render_share(plan) -> str:
-    first = plan.stages[0] if plan.stages else None
-    if not first:
+    if not plan.stages:
         return "搞定了，下午出发～"
+    first = plan.stages[0]
+    food = next((s for s in plan.stages if s.name == "吃"), None)
+    food_name = food.primary.name if food else "一家轻食店"
     return (
         f"搞定了，下午 {first.start_time} 出发，先去 {first.primary.name}，"
-        f"之后吃饭定在 {plan.stages[1].primary.name if len(plan.stages) > 1 else '一家轻食店'}，"
-        "美团已经下好单啦～"
+        f"之后吃饭定在 {food_name}，美团已经下好单啦～"
     )
 
 
