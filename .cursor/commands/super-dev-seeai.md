@@ -2,7 +2,7 @@
 
 在当前项目触发 Super Dev SEEAI 赛事极速版。
 
-> **本仓库：** 先读 [`.super-dev/WORKFLOW.md`](../../.super-dev/WORKFLOW.md)。PRD/架构以 `01`、`02` 为准；**勿重写** `apps/api/weekend_agent/`。
+> **本仓库：** 先读 [`.super-dev/WORKFLOW.md`](../../.super-dev/WORKFLOW.md)。PRD/架构以 `01`、`02` 为准；**勿重写** `backend/`。
 
 ## 输入
 - 需求描述: `$ARGUMENTS`
@@ -108,7 +108,7 @@
 2. 再生成 compact `output/*-prd.md`、`output/*-architecture.md`、`output/*-uiux.md`（对齐 `01`、`02`）
 3. 三份 compact 文档完成后，必须先等待用户明确确认
 4. 用户确认后，再创建 compact Spec / tasks
-5. Spec 之后直接进入 full-stack sprint：先做主展示前端，再对接 `apps/api` 现有 SSE/API，然后统一 polish
+5. Spec 之后直接进入 full-stack sprint：先做主展示前端，再对接 `backend/` 现有 SSE/API，然后统一 polish
 6. 最后输出 demo 路径、亮点总结与如何讲解这个作品
 
 ## 设计与质量要求
@@ -122,7 +122,7 @@
 - 不要跳过 research / 三文档 / docs confirm / spec。
 - 不要把 SEEAI 模式扩回标准 Super Dev 的 preview gate / 长质量闭环。
 - 不要在文档确认前直接开工。
-- 不要用空壳后端替换 `apps/api/weekend_agent/`。
+- 不要用空壳后端替换 `backend/`。
 
 ## Super Dev SEEAI Flow Contract
 - SUPER_DEV_SEEAI_FLOW_CONTRACT_V1

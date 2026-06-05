@@ -151,6 +151,8 @@ class OrderAddonReq(BaseModel):
     poi_id: str
     idempotency_key: str
     items: list[Any] | None = None
+    delivery_address: str | None = None
+    deliver_to_poi_id: str | None = None
     force_fail: str | None = None
 
 
@@ -161,6 +163,8 @@ def order_order_addon(req: OrderAddonReq) -> dict[str, Any]:
             poi_id=req.poi_id,
             idempotency_key=req.idempotency_key,
             items=req.items,
+            delivery_address=req.delivery_address,
+            deliver_to_poi_id=req.deliver_to_poi_id,
             force_fail=req.force_fail,
         )
     except ToolError as e:

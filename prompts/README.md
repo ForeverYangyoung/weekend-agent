@@ -2,7 +2,7 @@
 
 将 Agent 用到的 system / user 模板外置到此目录，与代码中的加载路径保持一致。
 
-建议文件（待从 `apps/api/weekend_agent/nodes/` 抽离）：
+建议文件（待从 `backend/nodes/` 抽离）：
 
 - `profiler.md`
 - `planner.md`

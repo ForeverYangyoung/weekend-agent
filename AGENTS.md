@@ -12,7 +12,7 @@ alwaysApply: true
 - Summarize the three core documents to the user and wait for user confirmation before creating Spec/tasks or writing code.
 - Create Spec/tasks only after confirmation.
 - Execute frontend-first delivery before backend/database tasks, then run quality gate before release.
-- **Backend:** `apps/api/weekend_agent/` is the implemented LangGraph + FastAPI stack; extend it, do not replace with scaffold `main.py` patterns.
+- **Backend:** `backend/` is the implemented LangGraph + FastAPI stack; extend it, do not replace with scaffold patterns.
 - Before any UI implementation, first lock the icon library, typography, design token system, component ecosystem, and page skeleton from output/*-uiux.md.
 - Do not use emoji as functional icons or placeholders.
 - For non-conversational AI products, avoid Claude / ChatGPT-style sidebar chat shells unless the UI plan explicitly justifies them.
@@ -22,7 +22,7 @@ alwaysApply: true
 ## Coding Constraints (active during ALL coding phases)
 - Before writing ANY code, run `cat package.json` to check framework versions. If unsure, read official docs first.
 - Icons MUST come from Lucide/Heroicons/Tabler. No emoji as icons. No purple/pink gradient themes.
-- Frontend fetch URLs must exactly match backend route definitions (see `apps/api/weekend_agent/app.py`).
+- Frontend fetch URLs must exactly match backend route definitions (see `backend/server.py`).
 - Before writing each file: correct imports, no emoji, colors from tokens only.
 - After completing a feature, run build + lint. Fix errors before moving on.
 

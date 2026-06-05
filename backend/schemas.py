@@ -44,6 +44,7 @@ class GroupProfile(BaseModel):
     dietary: list[str] = Field(default_factory=list)  # 例 ["低卡", "不辣"]
     interests: list[str] = Field(default_factory=list)  # 例 ["亲子", "展览"]
     budget_per_person: int | None = None
+    district: str | None = None  # 目标区域，如「海淀区」
     raw_text: str = ""
     # 每字段置信度（0~1），缺失字段视为 0.5
     confidence: dict[str, float] = Field(default_factory=dict)

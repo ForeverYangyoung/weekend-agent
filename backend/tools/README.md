@@ -1,10 +1,12 @@
-# 假后台（Mock Tools）— 小白导读
+# Mock Tools — 小白导读
 
 ## 这是啥？
 
-`mock_client.py` = **假装是美团的服务器**，在内存里响应「查桌位」「订票」「取消」。
+`mock_meituan/backend.py` = **假装是美团的服务器**，在内存里响应「查桌位」「订票」「取消」。
 
-`registry.py` = **总机**：节点说 tool 名字，总机转给假后台。
+`registry.py` = **总机**：节点说 tool 名字，总机转给 HTTP 客户端。
+
+`http_client.py` = Agent 侧 HTTP 调用（默认 ASGI 内联，可切独立端口）。
 
 ## 谁在用？
 
@@ -21,4 +23,4 @@
 
 ## 以后接真 Mock Server
 
-只改 `mock_client.py` 里发 HTTP 到 `:8001`，**不要改**三个节点文件。
+改环境变量 `MOCK_MEITUAN_BASE_URL`，**不要改**节点文件。

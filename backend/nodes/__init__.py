@@ -3,6 +3,7 @@ from backend.nodes.compensator import compensator_node
 from backend.nodes.critic import critic_node
 from backend.nodes.dry_run import dry_run_node
 from backend.nodes.executor import executor_node
+from backend.nodes.hil import hil_apply_overrides_node
 from backend.nodes.notifier import notifier_node
 from backend.nodes.planner import planner_node
 from backend.nodes.profiler import profiler_node
@@ -14,6 +15,7 @@ __all__ = [
     "critic_node",
     "dry_run_node",
     "executor_node",
+    "hil_apply_overrides_node",
     "notifier_node",
     "planner_node",
     "profiler_node",

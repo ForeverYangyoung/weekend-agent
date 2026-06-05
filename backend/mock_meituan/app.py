@@ -1,14 +1,14 @@
 """独立可启动的 Mock 美团 FastAPI 应用。
 
 直接拉起：
-    uvicorn weekend_agent.mock_meituan.app:mock_app --port 8001
+    uvicorn backend.mock_meituan.app:mock_app --port 8001
 
 随后让 Agent 走真 TCP（默认走 in-process ASGI）：
     set MOCK_MEITUAN_BASE_URL=http://localhost:8001          # Windows PowerShell
     export MOCK_MEITUAN_BASE_URL=http://localhost:8001       # macOS / Linux
-    python -m weekend_agent.demo
+    python -m backend.demo
 
-接口同时被主服务 `weekend_agent.app` 挂在 `/mock-meituan/*`，
+接口同时被主服务 `backend.server` 挂在 `/mock-meituan/*`，
 方便 demo 时一个进程跑两件事。
 """
 from __future__ import annotations

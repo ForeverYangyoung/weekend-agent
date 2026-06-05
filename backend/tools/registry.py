@@ -92,12 +92,17 @@ def _build_payload(tool_name: str, args: dict, ctx: ToolContext, stage_name: str
             "force_fail": ff,
         }
     if tool_name == "order_addon":
-        return {
+        deliver_to = args.get("delivery_address") or args.get("deliver_to_poi_id")
+        payload = {
             "poi_id": args["poi_id"],
             "idempotency_key": key,
             "items": args.get("items"),
             "force_fail": ff,
         }
+        if deliver_to:
+            payload["delivery_address"] = deliver_to
+            payload["deliver_to_poi_id"] = deliver_to
+        return payload
     if tool_name == "cancel_order":
         return {"order_id": args["order_id"]}
 

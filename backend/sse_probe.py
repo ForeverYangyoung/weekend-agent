@@ -5,9 +5,9 @@
 - 也方便接前端前，先在终端看到完整 event 时序。
 
 用法：
-    python -m weekend_agent.sse_probe --input "下午两个人随便逛逛"
-    python -m weekend_agent.sse_probe --input "下午带老婆孩子出去玩" --fail 吃
-    python -m weekend_agent.sse_probe --url http://127.0.0.1:8000/v1/agent/stream --input "..."
+    python -m backend.sse_probe --input "下午两个人随便逛逛"
+    python -m backend.sse_probe --input "下午带老婆孩子出去玩" --fail 吃
+    python -m backend.sse_probe --url http://127.0.0.1:8000/v1/agent/stream --input "..."
 """
 from __future__ import annotations
 
@@ -119,7 +119,7 @@ def main() -> None:
                     console.print(f"[magenta]{ev}[/] {msg}")
     except (ConnectionRefusedError, OSError) as e:
         console.print(f"[red]连不上 {args.url}：{e}")
-        console.print("提示：先在另一个终端启动 [bold]python -m weekend_agent[/]。")
+        console.print("提示：先在另一个终端启动 [bold]python -m backend[/]。")
         sys.exit(2)
 
 

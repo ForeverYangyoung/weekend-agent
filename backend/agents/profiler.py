@@ -23,6 +23,7 @@ _FRIENDS_KEYWORDS = ("朋友", "哥们", "闺蜜", "同事", "同学", "搭子")
 _COUPLE_KEYWORDS = ("对象", "女朋友", "男朋友", "约会", "情侣", "二人世界")
 
 _LOW_CAL_KEYWORDS = ("减肥", "低卡", "轻食", "沙拉", "控糖", "减脂", "健康餐")
+_HEAVY_FLAVOR_KEYWORDS = ("重口味", "重口", "口味重", "想吃重", "重的")
 _NO_SPICY_KEYWORDS = ("不辣", "微辣", "清淡")
 
 # 兴趣标签 → 命中关键词
@@ -35,6 +36,21 @@ _INTEREST_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 
 _NEAR_HINTS = ("别太远", "不要远", "近点", "别离家太远", "附近", "周边")
+
+_DISTRICT_NAMES: tuple[str, ...] = (
+    "海淀", "朝阳", "西城", "东城", "丰台", "石景山", "通州", "昌平",
+    "大兴", "顺义", "房山", "门头沟", "怀柔", "平谷", "密云", "延庆",
+)
+
+_CUISINE_KEYWORDS: tuple[tuple[str, str], ...] = (
+    ("川菜", "川菜"),
+    ("火锅", "火锅"),
+    ("粤菜", "粤菜"),
+    ("日料", "日料"),
+    ("烤肉", "烤肉"),
+    ("轻食", "轻食"),
+    ("沙拉", "轻食"),
+)
 _AFTERNOON_HINTS = ("下午", "饭后", "下午茶")
 _EVENING_HINTS = ("晚上", "晚饭", "夜里", "晚餐")
 _MORNING_HINTS = ("上午", "早上", "早饭")
@@ -193,6 +209,10 @@ def _infer_dietary(text: str) -> tuple[list[str], list[tuple[str, str, float]]]:
     if no_spicy:
         tags.append("不辣")
         ev.append(("不辣", no_spicy[0], 0.85))
+    heavy_hits = _hits(text, _HEAVY_FLAVOR_KEYWORDS)
+    if heavy_hits:
+        tags.append("重口味")
+        ev.append(("重口味", heavy_hits[0], 0.88))
     return tags, ev
 
 
@@ -221,7 +241,31 @@ def _infer_budget(text: str) -> tuple[int | None, float, str]:
         m = pat.search(text)
         if m:
             return int(m.group(1)), 0.9, f"{label}={m.group(0)}"
+    m = re.search(r"(\d+)\s*以内", text)
+    if m:
+        return int(m.group(1)), 0.88, f"以内={m.group(0)}"
+    m = re.search(r"不超过\s*(\d+)", text)
+    if m:
+        return int(m.group(1)), 0.88, f"不超过={m.group(0)}"
     return None, 0.4, ""
+
+
+def _infer_district(text: str) -> tuple[str | None, float, str]:
+    for name in _DISTRICT_NAMES:
+        token = f"{name}区"
+        if token in text or name in text:
+            return token, 0.9, token
+    return None, 0.4, ""
+
+
+def _infer_cuisine_tags(text: str) -> tuple[list[str], list[tuple[str, str, float]]]:
+    tags: list[str] = []
+    ev: list[tuple[str, str, float]] = []
+    for kw, label in _CUISINE_KEYWORDS:
+        if kw in text and label not in tags:
+            tags.append(label)
+            ev.append((label, kw, 0.85))
+    return tags, ev
 
 
 # ─────────────────────────── 历史偏好融合 ───────────────────────────
@@ -278,7 +322,35 @@ _SCENE_LABEL = {
 }
 
 
+_PEOPLE_INTEREST_RE = re.compile(r"^\d+人?$")
+
+
+def _sanitize_profile_consistency(profile: GroupProfile) -> GroupProfile:
+    """去掉人数/场景自相矛盾的画像（如 独自 + 1人 + 兴趣「3人」）。"""
+    profile.interests = [
+        i for i in profile.interests if not _PEOPLE_INTEREST_RE.match(str(i).strip())
+    ]
+
+    if profile.people_count >= 3 and profile.scene in ("solo", "unknown"):
+        profile.scene = "friends"
+    elif profile.people_count == 2 and profile.scene == "solo":
+        profile.scene = "couple"
+    elif profile.people_count == 1 and profile.scene == "friends":
+        profile.people_count = max(profile.people_count, 3)
+        profile.scene = "friends"
+    elif profile.people_count == 1 and profile.scene == "family":
+        profile.people_count = max(profile.people_count, 3)
+
+    if profile.scene == "friends" and profile.people_count < 2:
+        profile.people_count = 4
+    if profile.scene == "family" and profile.people_count < 2:
+        profile.people_count = 3
+
+    return profile
+
+
 def _build_editable_tags(profile: GroupProfile, has_history: bool) -> list[EditableTag]:
+    profile = _sanitize_profile_consistency(profile)
     tags: list[EditableTag] = [
         EditableTag(
             key="scene",
@@ -336,6 +408,16 @@ def _build_editable_tags(profile: GroupProfile, has_history: bool) -> list[Edita
                 label=f"约 ¥{profile.budget_per_person}/人",
                 value=str(profile.budget_per_person),
                 confidence=profile.confidence.get("budget_per_person", 0.5),
+                source="utterance",
+            )
+        )
+    if profile.district:
+        tags.append(
+            EditableTag(
+                key="district",
+                label=profile.district,
+                value=profile.district,
+                confidence=profile.confidence.get("district", 0.5),
                 source="utterance",
             )
         )
@@ -495,10 +577,108 @@ def analyze_profile(
             )
         )
 
+    district, dist_conf, dist_term = _infer_district(text)
+    profile.district = district
+    profile.confidence["district"] = dist_conf
+    if district:
+        evidence.append(
+            ProfileEvidence(
+                field="district", value=district, term=dist_term,
+                confidence=dist_conf, source="utterance",
+            )
+        )
+
+    cuisines, cuisine_ev = _infer_cuisine_tags(text)
+    for label in cuisines:
+        if label not in profile.dietary and label not in profile.interests:
+            profile.dietary.append(label)
+    for value, term, conf in cuisine_ev:
+        evidence.append(
+            ProfileEvidence(
+                field="dietary", value=value, term=term,
+                confidence=conf, source="utterance",
+            )
+        )
+
     has_history = bool(history_context)
     if has_history:
         _merge_history(profile, history_context, evidence)
 
+    profile = _sanitize_profile_consistency(profile)
     profile.evidence = evidence
     profile.editable_tags = _build_editable_tags(profile, has_history=has_history)
     return profile
+
+
+def apply_profile_overrides(
+    profile: GroupProfile,
+    overrides: list[dict[str, str]],
+) -> GroupProfile:
+    """HIL：把前端点改标签合并回 GroupProfile，并重建 editable_tags。"""
+    updated = profile.model_copy(deep=True)
+
+    for item in overrides:
+        key = (item.get("key") or "").strip()
+        value = (item.get("value") or "").strip()
+        action = (item.get("action") or "set").strip()
+
+        if not key:
+            continue
+
+        if key == "dietary":
+            if action == "remove":
+                updated.dietary = [d for d in updated.dietary if d != value]
+            elif action == "add" and value and value not in updated.dietary:
+                updated.dietary.append(value)
+            elif action == "set":
+                updated.dietary = [value] if value else []
+            if value in ("轻食", "低卡"):
+                updated.dietary = [
+                    d for d in updated.dietary if d not in ("重口味", "烤肉", "火锅")
+                ]
+            elif value in ("重口味", "烤肉", "火锅"):
+                updated.dietary = [
+                    d for d in updated.dietary if d not in ("轻食", "低卡")
+                ]
+        elif key == "interests":
+            if action == "remove":
+                updated.interests = [i for i in updated.interests if i != value]
+            elif action == "add" and value and value not in updated.interests:
+                updated.interests.append(value)
+            elif action == "set":
+                updated.interests = [value] if value else []
+        elif key == "district":
+            if action == "remove":
+                updated.district = None
+            else:
+                updated.district = value or None
+                updated.confidence["district"] = 0.95
+        elif key == "budget_per_person":
+            if action == "remove":
+                updated.budget_per_person = None
+            else:
+                try:
+                    updated.budget_per_person = int(value)
+                    updated.confidence["budget_per_person"] = 0.95
+                except ValueError:
+                    pass
+        elif key == "scene" and value:
+            updated.scene = value  # type: ignore[assignment]
+            updated.confidence["scene"] = 0.95
+        elif key == "people_count" and value:
+            try:
+                updated.people_count = max(1, int(value))
+                updated.confidence["people_count"] = 0.95
+            except ValueError:
+                pass
+        elif key == "distance_limit_km" and value:
+            try:
+                updated.distance_limit_km = max(1.0, float(value))
+                updated.confidence["distance_limit_km"] = 0.95
+            except ValueError:
+                pass
+
+    updated = _sanitize_profile_consistency(updated)
+    has_history = bool(updated.history_weights)
+    updated.editable_tags = _build_editable_tags(updated, has_history=has_history)
+    return updated

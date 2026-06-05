@@ -48,6 +48,9 @@ class AgentState(TypedDict, total=False):
     executed_calls: list[ToolCall]
     failed_calls: list[ToolCall]
 
+    # ── HIL：前端点改标签回写（replan 前写入，hil 节点消费后清空）──
+    profile_overrides: list[dict[str, str]]
+
     # ── 用户在 HIL 节点的确认结果 ──
     user_confirmed: bool
 

@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from backend.app import app
+from backend.server import app
 
 
 def test_health() -> None:
@@ -9,34 +9,22 @@ def test_health() -> None:
     assert r.status_code == 200
     data = r.json()
     assert data["status"] == "ok"
-    assert data.get("playground") == "/playground"
-    assert data.get("stream_alt") == "/agent/stream"
+    assert data.get("stream") == "/v1/agent/stream"
+    assert data.get("confirm") == "/v1/agent/confirm"
+    assert data.get("replan") == "/v1/agent/replan"
 
 
-def test_ground_and_ui_redirect() -> None:
-    c = TestClient(app, follow_redirects=False)
-    for path in ("/ground", "/ui"):
-        r = c.get(path)
-        assert r.status_code in (301, 302, 303, 307, 308)
-        assert "/playground" in (r.headers.get("location") or "")
-
-
-def test_playground_served() -> None:
+def test_root_serves_frontend_or_build_hint() -> None:
     c = TestClient(app)
-    r = c.get("/playground")
-    assert r.status_code == 200
-    assert "text/html" in r.headers.get("content-type", "")
-    assert b"Weekend Agent" in r.content
-
-
-def test_root_redirects_to_playground() -> None:
-    c = TestClient(app, follow_redirects=False)
     r = c.get("/")
-    assert r.status_code in (301, 302, 303, 307, 308)
-    assert "/playground" in (r.headers.get("location") or "")
+    if r.status_code == 200:
+        assert "text/html" in r.headers.get("content-type", "")
+    else:
+        assert r.status_code == 503
+        assert "npm" in r.text
 
 
-def test_stream_agent_sse_done() -> None:
+def test_stream_agent_sse_awaiting_confirm() -> None:
     c = TestClient(app)
     for url in ("/v1/agent/stream", "/agent/stream"):
         buf = ""
@@ -49,4 +37,5 @@ def test_stream_agent_sse_done() -> None:
             for chunk in resp.iter_text():
                 buf += chunk
         assert "event" in buf
+        assert "awaiting_confirm" in buf
         assert '"event": "done"' in buf or '"event":"done"' in buf

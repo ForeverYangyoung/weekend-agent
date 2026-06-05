@@ -32,6 +32,7 @@ from backend.schemas import (
 _DURATION_PLAY = 150  # 玩 2.5h
 _DURATION_TRANSIT = 30  # 通勤 30min
 _DURATION_EAT = 120  # 吃 2h
+_MAX_PLAY_EAT_DIST_KM = 3.0  # 玩/吃须在同一商圈，避免跨城组合
 _ADDON_AFTER_EAT_START = 90  # 加餐相对「吃」开始的偏移
 _ADDON_DURATION = 15
 
@@ -66,10 +67,50 @@ def _summary(scene: str, stages: list[PlanStage], order_label: str) -> str:
 
 _KIDS_KEYS = ("亲子", "儿童", "公园", "童", "宝宝", "海洋馆")
 _LOW_CAL_KEYS = ("轻食", "沙拉", "健康", "低卡", "蔬食")
+_CUISINE_TAGS = frozenset({"川菜", "火锅", "粤菜", "日料", "烤肉", "轻食", "江浙菜"})
 
 
 def _candidate_text(c: POICandidate) -> str:
-    return f"{c.name} {c.category} {c.reason}".lower()
+    tags = c.metadata.get("tags") or []
+    tag_str = " ".join(str(t) for t in tags)
+    return f"{c.name} {c.category} {c.reason} {tag_str}".lower()
+
+
+def _explicit_cuisines(profile: GroupProfile) -> set[str]:
+    """用户明确指定的菜系（来自 dietary / interests / HIL 点改）。"""
+    combined = set(profile.dietary) | set(profile.interests)
+    return {t for t in combined if t in _CUISINE_TAGS}
+
+
+def _matches_cuisine(c: POICandidate, cuisines: set[str]) -> bool:
+    text = _candidate_text(c)
+    return any(cuisine.lower() in text for cuisine in cuisines)
+
+
+_HEAVY_FOOD_KEYS = ("烤肉", "火锅", "烧烤", "重口味", "川菜", "湘菜")
+
+
+def _wants_light_meal(profile: GroupProfile) -> bool:
+    light = {"轻食", "低卡"}
+    return bool(light & set(profile.dietary)) or bool(
+        light & _explicit_cuisines(profile)
+    ) or bool(light & set(profile.interests))
+
+
+def _wants_heavy_meal(profile: GroupProfile) -> bool:
+    return "重口味" in profile.dietary
+
+
+def _has_strict_constraints(profile: GroupProfile, stage_name: str) -> bool:
+    if stage_name == "吃" and (
+        _explicit_cuisines(profile)
+        or _wants_light_meal(profile)
+        or _wants_heavy_meal(profile)
+    ):
+        return True
+    if stage_name == "玩" and profile.scene == "family" and profile.kids_ages:
+        return True
+    return False
 
 
 def _passes_hard_filter(
@@ -81,15 +122,34 @@ def _passes_hard_filter(
     这里只挑「典型不可接受」的几条，保证规则可解释。
     """
     text = _candidate_text(c)
+    cuisines = _explicit_cuisines(profile)
 
     # 1) 家庭场景 + 玩阶段：必须亲子友好
     if stage_name == "玩" and profile.scene == "family" and profile.kids_ages:
         if not any(k.lower() in text for k in _KIDS_KEYS):
             return False
 
-    # 2) 低卡需求 + 吃阶段：餐厅名/类目必须含轻食/沙拉等
-    if stage_name == "吃" and "低卡" in profile.dietary:
-        if not any(k.lower() in text for k in _LOW_CAL_KEYS):
+    # 2) 吃阶段：显式菜系 / 口味约束（轻食与烤肉互斥）
+    if stage_name == "吃":
+        if _wants_light_meal(profile):
+            if any(k.lower() in text for k in _HEAVY_FOOD_KEYS):
+                return False
+            if not any(k.lower() in text for k in _LOW_CAL_KEYS):
+                return False
+        elif cuisines:
+            if not _matches_cuisine(c, cuisines):
+                return False
+        elif _wants_heavy_meal(profile):
+            if not any(k.lower() in text for k in _HEAVY_FOOD_KEYS):
+                return False
+        elif "低卡" in profile.dietary:
+            if not any(k.lower() in text for k in _LOW_CAL_KEYS):
+                return False
+
+    # 2b) 朋友聚餐：过滤明显单人简餐（演示社交场景）
+    if stage_name == "吃" and profile.scene == "friends" and profile.people_count >= 4:
+        snack_keys = ("快餐", "小吃", "简餐", "便利店")
+        if any(k in text for k in snack_keys):
             return False
 
     # 3) 距离上限（researcher 已过滤一次；planner 再保险，防 stub 进来）
@@ -113,7 +173,9 @@ def _filter_stage_candidates(
     ]
     if kept:
         return kept
-    # 全被砍光：用未硬过滤但避开 blocked 的，保证 demo 不挂
+    # 有硬约束时禁止回退到不合规候选（避免「标了轻食却推烤肉」）
+    if _has_strict_constraints(profile, stage.stage_name):
+        return []
     fallback = [c for c in stage.candidates if c.poi_id not in blocked]
     return fallback or list(stage.candidates)
 
@@ -122,23 +184,47 @@ def _filter_stage_candidates(
 
 
 def _determine_orders(profile: GroupProfile) -> list[tuple[str, ...]]:
-    """根据时间窗生成候选阶段顺序（参考 planner/timeline.py 的 enumerate_candidate_orders）。
+    """生成候选阶段顺序。
 
-    规则只做建议，最终由 Planner 遍历所有候选选出可成图的方案。
+    Demo 策略：Top-K 差异落在「不同店组合」，不靠同一套店仅换玩/吃顺序。
+    因此默认只枚举「先玩后吃」；饭点出发可在首方案备注里体现时间轴。
     """
-    if not profile.start_time:
-        return [("玩", "吃"), ("吃", "玩")]
+    _ = profile
+    return [("玩", "吃")]
 
-    try:
-        start_h = int(profile.start_time.split(":")[0])
-    except (ValueError, IndexError):
-        return [("玩", "吃"), ("吃", "玩")]
 
-    # 饭点出发 → 先吃后玩更合理
-    if 11 <= start_h <= 13 or 17 <= start_h <= 19:
-        return [("吃", "玩"), ("玩", "吃")]
-    # 午后/上午 → 先玩后吃
-    return [("玩", "吃"), ("吃", "玩")]
+def _play_eat_distance_ok(play: POICandidate, eat: POICandidate) -> bool:
+    """玩/吃两地距离（相对 home 偏移）不超过阈值，保证顺路。"""
+    d_play = float(play.metadata.get("distance_km", 0) or 0)
+    d_eat = float(eat.metadata.get("distance_km", 0) or 0)
+    return abs(d_play - d_eat) <= _MAX_PLAY_EAT_DIST_KM
+
+
+def _candidate_rank(c: POICandidate) -> float:
+    if c.breakdown is not None:
+        return c.breakdown.total
+    return c.score
+
+
+def _iter_play_eat_pairs(
+    play_pool: list[POICandidate],
+    eat_pool: list[POICandidate],
+) -> list[tuple[POICandidate, POICandidate]]:
+    pairs: list[tuple[POICandidate, POICandidate]] = []
+    for play in play_pool:
+        for eat in eat_pool:
+            if _play_eat_distance_ok(play, eat):
+                pairs.append((play, eat))
+    pairs.sort(key=lambda pe: (_candidate_rank(pe[0]) + _candidate_rank(pe[1])) / 2, reverse=True)
+    return pairs
+
+
+def _pick_play_eat_pair(
+    play_pool: list[POICandidate],
+    eat_pool: list[POICandidate],
+) -> tuple[POICandidate, POICandidate] | None:
+    pairs = _iter_play_eat_pairs(play_pool, eat_pool)
+    return pairs[0] if pairs else None
 
 
 def _build_plan_with_order(
@@ -146,6 +232,9 @@ def _build_plan_with_order(
     research_by_name: dict[str, ResearchStageResult],
     blocked: set[str],
     order: tuple[str, ...],
+    *,
+    play: POICandidate | None = None,
+    eat: POICandidate | None = None,
 ) -> Plan | None:
     """按给定阶段顺序构建一个完整 Plan；缺关键阶段则返回 None。"""
     play_stage = research_by_name.get("玩")
@@ -158,8 +247,13 @@ def _build_plan_with_order(
     if not play_pool or not eat_pool:
         return None
 
-    play = play_pool[0]
-    eat = eat_pool[0]
+    if play is None or eat is None:
+        pair = _pick_play_eat_pair(play_pool, eat_pool)
+        if pair is None:
+            return None
+        play, eat = pair
+    elif not _play_eat_distance_ok(play, eat):
+        return None
 
     start = profile.start_time or "14:00"
     cursor = start
@@ -197,13 +291,19 @@ def _build_plan_with_order(
         addon_pool = _filter_stage_candidates(addon_stage, profile, blocked)
         if addon_pool:
             addon = addon_pool[0]
+            eat_poi_id = stage_objs["吃"].primary.poi_id
+            eat_name = stage_objs["吃"].primary.name
+            addon_meta = dict(addon.metadata or {})
+            addon_meta["target_restaurant"] = eat_poi_id
+            addon_meta["deliver_to_poi_id"] = eat_poi_id
+            addon_with_target = addon.model_copy(update={"metadata": addon_meta})
             addon_start = _shift(stage_objs["吃"].start_time, _ADDON_AFTER_EAT_START)
             stage_objs["加餐"] = PlanStage(
                 name="加餐",
                 start_time=addon_start,
                 end_time=_shift(addon_start, _ADDON_DURATION),
-                primary=addon,
-                notes=addon.reason,
+                primary=addon_with_target,
+                notes=f"送至餐厅「{eat_name}」（{eat_poi_id}）",
             )
 
     # 按时间排序成 stages 列表
@@ -218,6 +318,77 @@ def _build_plan_with_order(
     plan.summary = _summary(profile.scene, final_stages, order_label)
     plan.score = _plan_score(plan)
     return plan
+
+
+def merge_targeted_addon(
+    plan: Plan,
+    profile: GroupProfile,
+    targeted: ResearchResult | None,
+) -> Plan:
+    """精准搜完成后，把加餐阶段并入方案并绑定送餐餐厅 ID。"""
+    if targeted is None:
+        return plan
+
+    eat_stage = next((s for s in plan.stages if s.name == "吃"), None)
+    if eat_stage is None:
+        return plan
+
+    if any(s.name == "加餐" for s in plan.stages):
+        stages = []
+        changed = False
+        for s in plan.stages:
+            if s.name != "加餐":
+                stages.append(s)
+                continue
+            meta = dict(s.primary.metadata or {})
+            if not meta.get("deliver_to_poi_id"):
+                meta["deliver_to_poi_id"] = eat_stage.primary.poi_id
+                meta["target_restaurant"] = eat_stage.primary.poi_id
+                s = s.model_copy(
+                    update={
+                        "primary": s.primary.model_copy(update={"metadata": meta}),
+                        "notes": f"送至餐厅「{eat_stage.primary.name}」（{eat_stage.primary.poi_id}）",
+                    }
+                )
+                changed = True
+            stages.append(s)
+        if not changed:
+            return plan
+        updated = plan.model_copy(update={"stages": stages})
+        return updated
+
+    addon_result = next((s for s in targeted.stages if s.stage_name == "加餐"), None)
+    if addon_result is None or addon_result.selected is None:
+        return plan
+
+    addon = addon_result.selected
+    eat_poi_id = eat_stage.primary.poi_id
+    eat_name = eat_stage.primary.name
+    addon_meta = dict(addon.metadata or {})
+    addon_meta["target_restaurant"] = eat_poi_id
+    addon_meta["deliver_to_poi_id"] = eat_poi_id
+    addon_with_target = addon.model_copy(update={"metadata": addon_meta})
+
+    addon_start = _shift(eat_stage.start_time, _ADDON_AFTER_EAT_START)
+    new_stage = PlanStage(
+        name="加餐",
+        start_time=addon_start,
+        end_time=_shift(addon_start, _ADDON_DURATION),
+        primary=addon_with_target,
+        notes=f"送至餐厅「{eat_name}」（{eat_poi_id}）",
+    )
+
+    stages = sorted([*plan.stages, new_stage], key=lambda s: s.start_time)
+    updated = plan.model_copy(
+        update={
+            "stages": stages,
+            "order_label": " → ".join(s.name for s in stages),
+            "total_cost_estimate": _estimate_cost(profile.people_count, stages),
+        }
+    )
+    updated.summary = _summary(profile.scene, stages, updated.order_label)
+    updated.score = _plan_score(updated)
+    return updated
 
 
 def _plan_score(plan: Plan) -> float:
@@ -247,20 +418,59 @@ def build_plans(
     """
     blocked = blocked or set()
     by_name = {s.stage_name: s for s in research.stages}
-    plans: list[Plan] = []
-    seen_signatures: set[tuple[str, str]] = set()
-    for order in _determine_orders(profile):
-        plan = _build_plan_with_order(profile, by_name, blocked, order)
-        if plan is None:
-            continue
-        sig = (plan.order_label, plan.stages[0].primary.poi_id if plan.stages else "")
-        if sig in seen_signatures:
-            continue
-        seen_signatures.add(sig)
-        plans.append(plan)
+    play_stage = by_name.get("玩")
+    eat_stage = by_name.get("吃")
+    if play_stage is None or eat_stage is None:
+        return []
 
-    plans.sort(key=lambda p: p.score, reverse=True)
-    return plans[:top_k]
+    play_pool = _filter_stage_candidates(play_stage, profile, blocked)
+    eat_pool = _filter_stage_candidates(eat_stage, profile, blocked)
+    if not play_pool or not eat_pool:
+        return []
+
+    pair_plans: list[Plan] = []
+    seen_poi_sets: set[frozenset[str]] = set()
+    orders = _determine_orders(profile)
+
+    for play, eat in _iter_play_eat_pairs(play_pool, eat_pool):
+        poi_sig = frozenset({play.poi_id, eat.poi_id})
+        if poi_sig in seen_poi_sets:
+            continue
+        seen_poi_sets.add(poi_sig)
+        for order in orders:
+            plan = _build_plan_with_order(
+                profile, by_name, blocked, order, play=play, eat=eat
+            )
+            if plan is not None:
+                pair_plans.append(plan)
+                break
+
+    pair_plans.sort(key=lambda p: p.score, reverse=True)
+
+    selected: list[Plan] = []
+    used_eat_ids: set[str] = set()
+    for plan in pair_plans:
+        eat_id = next(
+            (s.primary.poi_id for s in plan.stages if s.name == "吃"),
+            "",
+        )
+        if selected and eat_id and eat_id in used_eat_ids:
+            continue
+        selected.append(plan)
+        if eat_id:
+            used_eat_ids.add(eat_id)
+        if len(selected) >= top_k:
+            break
+
+    if len(selected) < top_k:
+        for plan in pair_plans:
+            if plan in selected:
+                continue
+            selected.append(plan)
+            if len(selected) >= top_k:
+                break
+
+    return selected
 
 
 # ─────────────────────────── 顺路活动搜索建议 ───────────────────────────
@@ -455,9 +665,27 @@ def build_family_stub() -> Plan:
     )
 
 
-def build_friends_stub() -> Plan:
+def build_friends_stub(profile: GroupProfile | None = None) -> Plan:
+    light = profile is not None and _wants_light_meal(profile)
+    eat = POICandidate(
+        poi_id="poi_rest_203" if light else "poi_rest_201",
+        name="Wagas 轻食（三里屯）" if light else "姜虎东白丁烤肉（三里屯）",
+        category="轻食" if light else "餐厅",
+        score=0.86 if light else 0.89,
+        reason="4 人窗边位，沙拉碗适合聚餐" if light else "4 人聚餐口碑高",
+        metadata={
+            "avg_price": 95 if light else 160,
+            "distance_km": 1.5 if light else 1,
+            "tags": ["轻食", "沙拉", "低卡", "社交"] if light else ["烤肉", "社交"],
+        },
+    )
+    summary = (
+        "朋友下午：剧本杀 → 轻食聚餐 → 鲜花点缀"
+        if light
+        else "朋友下午：剧本杀 → 烤肉聚餐 → 鲜花点缀"
+    )
     return Plan(
-        summary="朋友下午：剧本杀 → 烤肉聚餐 → 鲜花点缀",
+        summary=summary,
         order_label="玩 → 吃 → 加餐",
         stages=[
             PlanStage(
@@ -469,20 +697,15 @@ def build_friends_stub() -> Plan:
                     name="罪有引力剧本杀（三里屯店）",
                     category="活动",
                     score=0.90,
-                    reason="4 人本，2 男 2 女均衡，距离 5km",
+                    reason="4 人本，2 男 2 女均衡",
+                    metadata={"avg_price": 120, "distance_km": 2},
                 ),
             ),
             PlanStage(
                 name="吃",
                 start_time="17:00",
                 end_time="19:00",
-                primary=POICandidate(
-                    poi_id="poi_rest_201",
-                    name="姜虎东白丁烤肉（三里屯）",
-                    category="餐厅",
-                    score=0.89,
-                    reason="4 人聚餐口碑高",
-                ),
+                primary=eat,
             ),
             PlanStage(
                 name="加餐",

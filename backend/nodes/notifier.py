@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 from backend.roles import trace_line
-from backend.schemas import SummaryCard
+from backend.schemas import SummaryCard, ToolStatus
 from backend.state import AgentState
 
 
-def _render_markdown(plan, profile, executed, alternatives) -> str:
+def _render_markdown(plan, profile, executed, alternatives, *, failed_calls, dry_run_calls) -> str:
     lines = [f"## {plan.summary}", ""]
     head = f"- 人数：{profile.people_count}　预计花费：约 ¥{plan.total_cost_estimate}"
     if plan.score:
@@ -31,11 +31,23 @@ def _render_markdown(plan, profile, executed, alternatives) -> str:
         lines.append("")
         lines.append("### 备选方案")
         for i, alt in enumerate(alternatives, start=1):
-            order_label = alt.order_label or " → ".join(s.name for s in alt.stages)
-            names = " → ".join(s.primary.name for s in alt.stages)
+            order_label = alt.order_label or " → ".join(st.name for st in alt.stages)
+            names = " → ".join(st.primary.name for st in alt.stages)
             lines.append(
                 f"- 方案 {i}（{order_label}，score={alt.score:.2f}，约 ¥{alt.total_cost_estimate}）：{names}"
             )
+
+    dry_failed = [c for c in dry_run_calls if c.status == ToolStatus.FAILED]
+    if failed_calls or dry_failed:
+        lines.append("")
+        lines.append(
+            "⚠️ **订座异常提醒**：部分热门门店已满座或预检未通过。"
+            "已尝试切换备选；若仍不满意，可放宽区域至 10 公里或更换菜系后让我重新规划。"
+        )
+        for c in failed_calls + dry_failed:
+            poi = (c.args or {}).get("poi_id", "—")
+            lines.append(f"- {c.stage_name} · `{poi}`：{c.error or '不可用'}")
+
     return "\n".join(lines)
 
 
@@ -54,6 +66,8 @@ def notifier_node(state: AgentState) -> dict:
     plan = state.get("plan")
     profile = state.get("group_profile")
     executed = state.get("executed_calls", []) or []
+    failed_calls = state.get("failed_calls", []) or []
+    dry_run_calls = state.get("dry_run_calls", []) or []
     alternatives = state.get("plan_alternatives") or []
 
     if not plan or not profile:
@@ -61,7 +75,14 @@ def notifier_node(state: AgentState) -> dict:
 
     card = SummaryCard(
         title=plan.summary,
-        body_markdown=_render_markdown(plan, profile, executed, alternatives),
+        body_markdown=_render_markdown(
+            plan,
+            profile,
+            executed,
+            alternatives,
+            failed_calls=failed_calls,
+            dry_run_calls=dry_run_calls,
+        ),
         share_text=_render_share(plan),
     )
 

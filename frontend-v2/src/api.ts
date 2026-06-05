@@ -1,18 +1,6 @@
-import type { SSEEvent } from './types'
+import type { ProfileOverride, SSEEvent } from './types'
 
-export async function* streamAgent(
-  userInput: string,
-  forceFailure?: string | null,
-): AsyncGenerator<SSEEvent> {
-  const res = await fetch('/v1/agent/stream', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      user_input: userInput,
-      ...(forceFailure ? { force_failure: forceFailure } : {}),
-    }),
-  })
-
+async function* readSSE(res: Response): AsyncGenerator<SSEEvent> {
   if (!res.ok) {
     const text = await res.text()
     throw new Error(`${res.status} ${text}`)
@@ -38,4 +26,63 @@ export async function* streamAgent(
       }
     }
   }
+}
+
+export async function* streamAgent(
+  userInput: string,
+  forceFailure?: string | null,
+): AsyncGenerator<SSEEvent> {
+  const res = await fetch('/v1/agent/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      user_input: userInput,
+      ...(forceFailure ? { force_failure: forceFailure } : {}),
+    }),
+  })
+  yield* readSSE(res)
+}
+
+export async function* replanAgent(
+  sessionId: string,
+  overrides: ProfileOverride[],
+  note?: string,
+): AsyncGenerator<SSEEvent> {
+  const res = await fetch('/v1/agent/replan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      session_id: sessionId,
+      overrides,
+      ...(note ? { note } : {}),
+    }),
+  })
+  yield* readSSE(res)
+}
+
+export interface ConfirmResult {
+  status: string
+  session_id: string
+  plan_id: string
+  executed: number
+  failed: number
+  orders: Array<{ stage: string; order_id: string; status: string }>
+  summary_card?: { title?: string; share_text?: string; body_markdown?: string }
+  trace_tail?: string[]
+}
+
+export async function confirmAgent(
+  sessionId: string,
+  planId: string,
+): Promise<ConfirmResult> {
+  const res = await fetch('/v1/agent/confirm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId, plan_id: planId }),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`${res.status} ${text}`)
+  }
+  return res.json() as Promise<ConfirmResult>
 }

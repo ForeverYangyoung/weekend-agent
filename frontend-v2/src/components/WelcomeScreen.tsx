@@ -9,8 +9,7 @@ export function WelcomeScreen({ greeting, prompts, onPromptClick, disabled }: Pr
   return (
     <div className="ai-bubble welcome-bubble">
       <div className="bubble-text welcome-text">{greeting}</div>
-      <div className="welcome-hint">可以像这样说"我下午想和老婆孩子一起出去玩……"</div>
-      <div className="welcome-hint">也可以输入"选择"，直接在我提供的选项中选择游玩和饮食偏好</div>
+      <div className="welcome-hint">点下方示例可一键填入；不满意方案可点「修改偏好重提」。</div>
       <div className="welcome-prompts">
         {prompts.map((p, i) => (
           <button

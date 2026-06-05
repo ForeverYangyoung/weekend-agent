@@ -2,66 +2,75 @@ import type { DisplayPlan } from '../types'
 
 interface Props {
   plan: DisplayPlan
+  isTop1?: boolean
   onConfirm: (planId: string) => void
+  onEditPreference: () => void
   disabled?: boolean
 }
 
-export function PlanCard({ plan, onConfirm, disabled }: Props) {
+export function PlanCard({ plan, isTop1, onConfirm, onEditPreference, disabled }: Props) {
+  const confirmDisabled = disabled || !plan.isValid
+
   return (
-    <div className="plan-card">
+    <div className={`plan-card ${plan.isValid ? '' : 'plan-card-invalid'}`}>
       <div className="plan-card-header">
-        <span className="plan-card-title">{plan.title}</span>
-        <span className="plan-card-badge">推荐</span>
+        <span className="plan-card-title">{plan.venueChain}</span>
+        <span className="plan-card-subtitle">{plan.diffSummary}</span>
+        {isTop1 && plan.isValid && <div className="badge-recommend">推荐</div>}
+        {!plan.isValid && <div className="badge-invalid">需重规划</div>}
       </div>
 
-      {/* Timeline stages */}
+      {!plan.isValid && (
+        <div className="plan-constraint-issues">
+          <div className="plan-issue-label">约束冲突，已禁止下单</div>
+          {plan.constraintIssues.map((issue, i) => (
+            <div key={i} className="plan-issue-item">{issue}</div>
+          ))}
+        </div>
+      )}
+
+      {plan.matchReasons.length > 0 && (
+        <div className="plan-match-reasons">
+          <div className="plan-match-label">约束命中（Profiler → Planner → Critic）</div>
+          <div className="plan-match-tags">
+            {plan.matchReasons.map((r, i) => (
+              <span key={i} className="match-tag">{r}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="plan-timeline">
-        <TimelineItem
-          icon="🎯"
-          time={plan.play.time}
-          name={plan.play.name}
-          desc={plan.play.desc}
-          tags={plan.play.tags}
-        />
-        <div className="timeline-connector" />
-        <TimelineItem
-          icon="🍽️"
-          time={plan.eat.time}
-          name={plan.eat.name}
-          desc={plan.eat.desc}
-          tags={plan.eat.tags}
-        />
-        {plan.addon && (
-          <>
-            <div className="timeline-connector dashed" />
-            <TimelineItem
-              icon="🧋"
-              time="顺路"
-              name={plan.addon.name}
-              desc={plan.addon.desc}
-              tags={plan.addon.tags}
-              isAddon
-            />
-          </>
-        )}
-      </div>
-
-      {/* Highlights */}
-      <div className="plan-highlights">
-        {plan.highlights.map((h, i) => (
-          <span key={i} className="highlight-tag">{h}</span>
+        {plan.timeline.map((item, index) => (
+          <div key={`${item.kind}-${index}`}>
+            {index > 0 && (
+              <div className={`timeline-connector ${item.kind === 'addon' ? 'dashed' : ''}`} />
+            )}
+            <TimelineItem item={item} />
+          </div>
         ))}
       </div>
 
-      {/* Footer */}
       <div className="plan-card-footer">
         <span className="plan-price">{plan.totalPrice}</span>
+      </div>
+
+      <div className="plan-card-actions">
         <button
-          className="confirm-btn"
-          onClick={() => onConfirm(plan.id)}
+          type="button"
+          className="btn-secondary"
+          onClick={onEditPreference}
           disabled={disabled}
         >
-          选这个
+          修改偏好重提
+        </button>
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={() => onConfirm(plan.id)}
+          disabled={confirmDisabled}
+        >
+          {plan.isValid ? '选这个（一键下单）' : '先重新规划'}
         </button>
       </div>
     </div>
@@ -69,26 +78,26 @@ export function PlanCard({ plan, onConfirm, disabled }: Props) {
 }
 
 function TimelineItem({
-  icon, time, name, desc, tags, isAddon,
+  item,
 }: {
-  icon: string
-  time: string
-  name: string
-  desc: string
-  tags: string[]
-  isAddon?: boolean
+  item: DisplayPlan['timeline'][number]
 }) {
   return (
-    <div className={`timeline-item ${isAddon ? 'addon' : ''}`}>
+    <div className={`timeline-item ${item.kind === 'addon' ? 'addon' : ''}`}>
       <div className="timeline-dot">
-        <span className="timeline-emoji">{icon}</span>
+        <span className="timeline-kind">{item.label}</span>
       </div>
       <div className="timeline-content">
-        <div className="timeline-time">{time}</div>
-        <div className="timeline-name">{name}</div>
-        <div className="timeline-desc">{desc}</div>
+        <div className="timeline-time">{item.time}</div>
+        <div className="timeline-name">{item.name}</div>
+        <div className="timeline-desc">{item.desc}</div>
+        {(item.priceLabel || item.distanceLabel) && (
+          <div className="timeline-meta">
+            {[item.priceLabel, item.distanceLabel].filter(Boolean).join(' · ')}
+          </div>
+        )}
         <div className="timeline-tags">
-          {tags.map((t, i) => (
+          {item.tags.map((t, i) => (
             <span key={i} className="tag">{t}</span>
           ))}
         </div>

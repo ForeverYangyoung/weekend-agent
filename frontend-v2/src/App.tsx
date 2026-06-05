@@ -1,38 +1,144 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import type { ChatMessage, DisplayPlan, PreferenceState, ProgressStep } from './types'
-import { streamAgent } from './api'
+import type {
+  ChatMessage,
+  DisplayPlan,
+  ProfileChip,
+  ProfileOverride,
+  ProgressStep,
+  SSEEvent,
+} from './types'
+import { confirmAgent, replanAgent, streamAgent } from './api'
+import { mapPlansFromBackend } from './mapPlans'
 import { InputBar } from './components/InputBar'
 import { WelcomeScreen } from './components/WelcomeScreen'
 import { ProgressIndicator } from './components/ProgressIndicator'
 import { PlanCards } from './components/PlanCards'
 import { PreferencePanel } from './components/PreferencePanel'
+import { ProfileChips } from './components/ProfileChips'
+
+const DEFAULT_PANEL_PREFS = {
+  distance: '5公里内',
+  diet: '重口味',
+  vibe: '轻松社交',
+}
 
 const INITIAL_MESSAGES: ChatMessage[] = [
   {
     id: 'welcome',
     role: 'ai',
     type: 'welcome',
-    text: '嗨，我是你的周末小助手，今天又不知道去哪玩？告诉我同行人数，时间以及特殊需求，我就能为您计划和下单啦。',
+    text:
+      '嗨，我是你的周末小助手。支持家庭出游和朋友聚会两种场景：\n我会先预检可订资源，你确认后再一键下单。\n\n家庭场景：请带上人数及特殊要求（如：带5岁娃，需要健康餐）\n\n朋友场景：请告诉我人数和口味偏好（如：4个人，想吃重口味）',
     timestamp: Date.now(),
   },
 ]
 
 const SUGGESTED_PROMPTS = [
-  '我下午想和老婆孩子一起出去玩，时间大概在2点~5点，我和老婆正在减肥，找好吃晚餐的地方',
-  '我今天想和三个大学同学一起出去玩，时间大概在2点~8点，工作了一周了，希望能在户外玩一玩',
+  '我下午想和老婆孩子一起出去玩，老婆正在减肥，孩子5岁',
+  '下午和三个朋友一起出去，4个人，别太远，想吃重口味',
+]
+
+const TRACE_PROGRESS: Array<{ prefix: string; label: string }> = [
+  { prefix: '[Profiler]', label: '正在理解您的出行画像…' },
+  { prefix: '[Researcher]', label: '正在搜索游玩与餐厅候选…' },
+  { prefix: '[Planner]', label: '正在规划行程顺序…' },
+  { prefix: '[TargetedResearcher]', label: '正在补充顺路小店…' },
+  { prefix: '[Executor·预检]', label: '正在打听票位与库存…' },
 ]
 
 function genId() {
   return Math.random().toString(36).slice(2, 10)
 }
 
+function progressFromTrace(trace: string[]): ProgressStep[] {
+  return TRACE_PROGRESS.map(({ prefix, label }) => ({
+    label,
+    done: trace.some((line) => line.includes(prefix)),
+  }))
+}
+
+function chipLabelForOverride(override: ProfileOverride): string {
+  if (override.key === 'district') return override.value
+  if (override.key === 'budget_per_person') return `约 ¥${override.value}/人`
+  if (override.key === 'people_count') return `${override.value} 人`
+  if (override.key === 'distance_limit_km') return `≤ ${override.value} km`
+  return override.value
+}
+
+function sceneChipForPeople(count: number): ProfileChip | null {
+  if (count >= 3) {
+    return { key: 'scene', label: '朋友', value: 'friends', source: 'utterance', editable: true }
+  }
+  if (count === 2) {
+    return { key: 'scene', label: '情侣', value: 'couple', source: 'utterance', editable: true }
+  }
+  if (count === 1) {
+    return { key: 'scene', label: '独自', value: 'solo', source: 'utterance', editable: true }
+  }
+  return null
+}
+
+function mergeProfileChips(prev: ProfileChip[], override: ProfileOverride): ProfileChip[] {
+  let next = prev.filter((c) => {
+    if (override.key === 'people_count') {
+      return (
+        c.key !== 'people_count'
+        && c.key !== 'scene'
+        && !(c.key === 'interests' && /^\d+人?$/.test(c.value))
+      )
+    }
+    if (override.key === 'dietary' && override.action === 'set') return c.key !== 'dietary'
+    if (override.key === 'interests' && override.action === 'set') return c.key !== 'interests'
+    if (override.action === 'add') {
+      return !(c.key === override.key && c.value === override.value)
+    }
+    if (override.action === 'set') {
+      return c.key !== override.key
+    }
+    return true
+  })
+
+  const chip: ProfileChip = {
+    key: override.key,
+    label: chipLabelForOverride(override),
+    value: override.value,
+    source: 'utterance',
+    editable: true,
+  }
+  next = [...next, chip]
+
+  if (override.key === 'people_count') {
+    const n = Number.parseInt(override.value, 10)
+    const sceneChip = sceneChipForPeople(n)
+    if (sceneChip) next = [...next.filter((c) => c.key !== 'scene'), sceneChip]
+  }
+
+  return next
+}
+
+function panelToOverrides(prefs: typeof DEFAULT_PANEL_PREFS): ProfileOverride[] {
+  const km = prefs.distance.match(/(\d+)/)?.[1] ?? '8'
+  return [
+    { key: 'distance_limit_km', value: km, action: 'set' },
+    { key: 'dietary', value: prefs.diet, action: 'set' },
+    { key: 'interests', value: prefs.vibe, action: 'set' },
+  ]
+}
+
 export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES)
-  const [appState, setAppState] = useState<'idle' | 'streaming' | 'plans_displayed' | 'preferences' | 'confirmed'>('idle')
+  const [appState, setAppState] = useState<
+    'idle' | 'streaming' | 'plans_displayed' | 'hil_editing' | 'confirmed'
+  >('idle')
   const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([])
   const [plans, setPlans] = useState<DisplayPlan[]>([])
-  const [preferences, setPreferences] = useState<PreferenceState | null>(null)
+  const [profileChips, setProfileChips] = useState<ProfileChip[]>([])
+  const [pendingOverrides, setPendingOverrides] = useState<ProfileOverride[]>([])
+  const [sessionId, setSessionId] = useState<string | null>(null)
   const [inputDisabled, setInputDisabled] = useState(false)
+  const [isReplanning, setIsReplanning] = useState(false)
+  const [isPreferencePanelOpen, setIsPreferencePanelOpen] = useState(false)
+  const [panelPreferences, setPanelPreferences] = useState(DEFAULT_PANEL_PREFS)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = useCallback(() => {
@@ -41,7 +147,7 @@ export default function App() {
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages, progressSteps, appState, scrollToBottom])
+  }, [messages, progressSteps, appState, profileChips, scrollToBottom])
 
   function addMessage(msg: Omit<ChatMessage, 'id' | 'timestamp'>) {
     const full: ChatMessage = { ...msg, id: genId(), timestamp: Date.now() }
@@ -49,71 +155,64 @@ export default function App() {
     return full
   }
 
+  async function consumePlanningStream(events: AsyncGenerator<SSEEvent>) {
+    let awaiting: SSEEvent | null = null
+    let lastTrace: string[] = []
+
+    for await (const ev of events) {
+      if (ev.event === 'state' && ev.state?.trace) {
+        lastTrace = ev.state.trace
+        setProgressSteps(progressFromTrace(lastTrace))
+      }
+      if (ev.event === 'awaiting_confirm') {
+        awaiting = ev
+      }
+      if (ev.event === 'error') {
+        throw new Error(ev.message ?? '规划失败')
+      }
+    }
+
+    if (!awaiting?.session_id || !awaiting.plans?.length) {
+      throw new Error('未收到可确认的方案，请重试')
+    }
+
+    setSessionId(awaiting.session_id)
+    setProfileChips(awaiting.profile_chips ?? [])
+    setPendingOverrides([])
+    setPlans(mapPlansFromBackend(awaiting.plans))
+    setProgressSteps(progressFromTrace(lastTrace).map((s) => ({ ...s, done: true })))
+
+    const chipText = (awaiting.profile_chips ?? []).map((c) => c.label).join('、')
+    const planMsg = addMessage({
+      role: 'ai',
+      type: 'plans',
+      text: chipText
+        ? `已按约束（${chipText}）筛出 ${awaiting.plans.length} 套不同店组合。卡片绿标是各 Agent 的命中说明；备选会标明与推荐的差异。`
+        : '预检完成！下方是真实候选方案。可点标签修改偏好后重搜，满意再点「选这个」确认下单。',
+    })
+    planMsg.plans = mapPlansFromBackend(awaiting.plans)
+
+    setAppState('plans_displayed')
+    setInputDisabled(false)
+    setIsReplanning(false)
+  }
+
   function handleSend(text: string) {
     if (!text.trim() || inputDisabled) return
-
-    if (text.trim() === '选择') {
-      handleChoiceMode()
-      return
-    }
 
     addMessage({ role: 'user', type: 'text', text: text.trim() })
     setAppState('streaming')
     setInputDisabled(true)
-    setProgressSteps([
-      { label: '正在为您寻找户外出行好去处……', done: false },
-      { label: '正在为您寻找适合的餐厅……', done: false },
-      { label: '正在为您寻找顺路小店……', done: false },
-      { label: '正在为您规划行程……', done: false },
-    ])
+    setProgressSteps(TRACE_PROGRESS.map((t) => ({ label: t.label, done: false })))
+    setPendingOverrides([])
+    setSessionId(null)
 
-    runStream(text.trim())
+    runInitialStream(text.trim())
   }
 
-  async function runStream(userInput: string) {
+  async function runInitialStream(userInput: string) {
     try {
-      let stepIndex = 0
-      const stepTimer = setInterval(() => {
-        setProgressSteps((prev) => {
-          const next = [...prev]
-          if (stepIndex < next.length) {
-            next[stepIndex] = { ...next[stepIndex], done: true }
-            stepIndex++
-          }
-          return next
-        })
-      }, 800)
-
-      let finalCard: { title?: string; share_text?: string; body_markdown?: string } | null = null
-
-      for await (const ev of streamAgent(userInput)) {
-        if (ev.event === 'final') {
-          finalCard = ev.summary_card ?? null
-        }
-      }
-
-      clearInterval(stepTimer)
-
-      // Mark all remaining steps done
-      setProgressSteps((prev) => prev.map((s) => ({ ...s, done: true })))
-
-      // Wait a moment for animation
-      await new Promise((r) => setTimeout(r, 600))
-
-      // Generate display plans from the backend result
-      const displayPlans = buildDisplayPlans(finalCard, userInput)
-      setPlans(displayPlans)
-
-      const planMsg = addMessage({
-        role: 'ai',
-        type: 'plans',
-        text: '已经为您找到两种计划，喜欢的话确认一下我就可以帮您点奶茶，买票，打车，订座啦',
-      })
-      // Attach plans to the message for rendering
-      planMsg.plans = displayPlans
-
-      setAppState('plans_displayed')
-      setInputDisabled(false)
+      await consumePlanningStream(streamAgent(userInput))
     } catch (err) {
       setProgressSteps([])
       setAppState('idle')
@@ -126,58 +225,103 @@ export default function App() {
     }
   }
 
-  function handleChoiceMode() {
-    addMessage({ role: 'user', type: 'text', text: '选择' })
-    const initialPrefs: PreferenceState = {
-      foodTags: [
-        { id: 'korean', label: '韩式', emoji: '🇰🇷', selected: false, recommended: true },
-        { id: 'thai', label: '泰味', emoji: '🇹🇭', selected: false, recommended: false },
-        { id: 'sichuan', label: '川麻', emoji: '🌶️', selected: false, recommended: false },
-        { id: 'fresh', label: '鲜香', emoji: '🦐', selected: false, recommended: false },
-        { id: 'sweet', label: '酸甜', emoji: '🍋', selected: false, recommended: false },
-      ],
-      activityTags: [
-        { id: 'photo', label: '拍照打卡', emoji: '📸', selected: false, recommended: true },
-        { id: 'outdoor', label: '户外运动', emoji: '🏃', selected: false, recommended: false },
-        { id: 'indoor', label: '室内休闲', emoji: '🎮', selected: false, recommended: false },
-        { id: 'culture', label: '文化展览', emoji: '🎨', selected: false, recommended: false },
-        { id: 'shopping', label: '逛逛街', emoji: '🛍️', selected: false, recommended: false },
-      ],
-      priorities: [
-        { id: 'transport', label: '交通', emoji: '🚗', order: 0 },
-        { id: 'food', label: '美食', emoji: '🍜', order: 1 },
-        { id: 'scenery', label: '风景', emoji: '🏞️', order: 2 },
-        { id: 'entertainment', label: '娱乐', emoji: '🎯', order: 3 },
-        { id: 'price', label: '价格', emoji: '💰', order: 4 },
-      ],
-    }
-    setPreferences(initialPrefs)
-
-    addMessage({
-      role: 'ai',
-      type: 'preferences',
-      text: '今天的胃口适合遇见谁？让我来规划，你来保持放松好心情！请选择你的偏好排序：',
-    })
-
-    setAppState('preferences')
+  function handleRemoveChip(override: ProfileOverride) {
+    setPendingOverrides((prev) => [...prev, override])
+    setProfileChips((prev) =>
+      prev.filter((c) => !(c.key === override.key && c.value === override.value)),
+    )
+    setAppState('hil_editing')
   }
 
-  function handleConfirmPlan(planId: string) {
+  function handleAddChip(override: ProfileOverride) {
+    setPendingOverrides((prev) => [...prev, override])
+    setProfileChips((prev) => mergeProfileChips(prev, override))
+    setAppState('hil_editing')
+  }
+
+  async function runReplanStream(overrides: ProfileOverride[], userText: string) {
+    if (!sessionId) return
+
+    setAppState('streaming')
+    setInputDisabled(true)
+    setIsReplanning(true)
+    setProgressSteps(TRACE_PROGRESS.map((t) => ({ label: t.label, done: false })))
+    setPendingOverrides(overrides)
+
+    addMessage({ role: 'user', type: 'text', text: userText })
+
+    try {
+      await consumePlanningStream(replanAgent(sessionId, overrides))
+    } catch (err) {
+      setProgressSteps([])
+      setAppState('hil_editing')
+      setInputDisabled(false)
+      setIsReplanning(false)
+      addMessage({
+        role: 'ai',
+        type: 'text',
+        text: `重规划失败：${err instanceof Error ? err.message : '未知错误'}`,
+      })
+    }
+  }
+
+  async function handleReplan() {
+    const text =
+      pendingOverrides.length > 0
+        ? `按新偏好重规划（${pendingOverrides.length} 项调整）`
+        : '重新规划'
+    await runReplanStream(pendingOverrides, text)
+  }
+
+  async function handleConfirmPlan(planId: string) {
+    if (!sessionId) return
     const plan = plans.find((p) => p.id === planId)
     if (!plan) return
 
+    setInputDisabled(true)
     addMessage({
       role: 'user',
       type: 'text',
       text: `确认选择：${plan.title}`,
     })
-    addMessage({
-      role: 'ai',
-      type: 'text',
-      text: `好的！已为您确认「${plan.title}」。正在为您下单……\n\n✅ 门票已购买\n✅ 餐厅已订座\n✅ 奶茶已下单\n\n祝您周末愉快！🎉`,
-    })
-    setAppState('confirmed')
-    setInputDisabled(true)
+
+    try {
+      const result = await confirmAgent(sessionId, planId)
+      const orderLines = result.orders
+        .map((o) => `✅ ${o.stage} 已下单 · 订单号 ${o.order_id}`)
+        .join('\n')
+
+      addMessage({
+        role: 'ai',
+        type: 'text',
+        text: `好的！已为您确认「${plan.title}」并完成下单。\n\n${orderLines || '（无订单回执）'}\n\n${result.summary_card?.share_text ?? ''}`,
+      })
+      setAppState('confirmed')
+    } catch (err) {
+      setInputDisabled(false)
+      addMessage({
+        role: 'ai',
+        type: 'text',
+        text: `下单失败：${err instanceof Error ? err.message : '未知错误'}`,
+      })
+    }
+  }
+
+  async function handlePreferenceSubmit(prefs: typeof DEFAULT_PANEL_PREFS) {
+    setIsPreferencePanelOpen(false)
+    const overrides = panelToOverrides(prefs)
+
+    if (!sessionId) {
+      handleSend(
+        `帮我安排周末出行。距离${prefs.distance}，想吃${prefs.diet}，氛围${prefs.vibe}。`,
+      )
+      return
+    }
+
+    setProfileChips((prev) =>
+      overrides.reduce((chips, o) => mergeProfileChips(chips, o), prev),
+    )
+    await runReplanStream(overrides, `按面板调整偏好（${prefs.diet} · ${prefs.distance}）`)
   }
 
   function handleRejectPlan() {
@@ -189,58 +333,16 @@ export default function App() {
     addMessage({
       role: 'ai',
       type: 'text',
-      text: '如果都不喜欢也可以补充更详细的偏好信息，我为您重新规划。比如告诉我：\n• 想去哪个区？\n• 有没有特别想吃的菜系？\n• 预算大概多少？',
+      text: '没问题，请点改下方偏好标签（× 删除 / 添加新偏好），然后点「按新偏好重新规划」。',
     })
-    setAppState('idle')
+    setAppState('hil_editing')
   }
 
-  function handlePreferencesConfirm() {
-    setAppState('streaming')
-    setInputDisabled(true)
-    setProgressSteps([
-      { label: '正在根据您的偏好寻找游玩地点……', done: false },
-      { label: '正在匹配合适的餐厅……', done: false },
-      { label: '正在规划最优路线……', done: false },
-      { label: '正在生成方案……', done: false },
-    ])
-
-    // Simulate preference-based planning
-    let step = 0
-    const timer = setInterval(() => {
-      setProgressSteps((prev) => {
-        const next = [...prev]
-        if (step < next.length) {
-          next[step] = { ...next[step], done: true }
-          step++
-        }
-        return next
-      })
-      if (step >= 4) {
-        clearInterval(timer)
-        finishPreferencePlanning()
-      }
-    }, 700)
-  }
-
-  function finishPreferencePlanning() {
-    const prefPlans = buildDisplayPlans(null, 'preferences')
-    setPlans(prefPlans)
-
-    const planMsg = addMessage({
-      role: 'ai',
-      type: 'plans',
-      text: '已经根据您的偏好为您找到两种计划，喜欢的话确认一下我就可以帮您安排啦',
-    })
-    planMsg.plans = prefPlans
-
-    setAppState('plans_displayed')
-    setInputDisabled(false)
-  }
+  const showChipEditor = appState === 'hil_editing' || appState === 'plans_displayed'
 
   return (
     <div className="app-container">
       <div className="app-phone">
-        {/* Status bar */}
         <div className="status-bar">
           <span className="status-time">9:41</span>
           <div className="status-icons">
@@ -248,16 +350,14 @@ export default function App() {
           </div>
         </div>
 
-        {/* Header */}
         <div className="chat-header">
           <div className="header-avatar">W</div>
           <div>
             <div className="header-title">Weekend Agent</div>
-            <div className="header-subtitle">周末出游助手 · 在线</div>
+            <div className="header-subtitle">周末出游助手 · HIL 在线</div>
           </div>
         </div>
 
-        {/* Messages area */}
         <div className="chat-messages">
           {messages.map((msg) => {
             if (msg.type === 'welcome') {
@@ -273,14 +373,6 @@ export default function App() {
               )
             }
 
-            if (msg.type === 'progress') {
-              return (
-                <div key={msg.id} className="msg-row msg-ai">
-                  <ProgressIndicator steps={msg.progressSteps ?? []} />
-                </div>
-              )
-            }
-
             if (msg.type === 'plans' && msg.plans) {
               return (
                 <div key={msg.id} className="msg-row msg-ai msg-plan-row">
@@ -289,32 +381,15 @@ export default function App() {
                     <PlanCards
                       plans={msg.plans}
                       onConfirm={handleConfirmPlan}
+                      onEditPreference={() => setIsPreferencePanelOpen(true)}
                       onReject={handleRejectPlan}
-                      disabled={appState === 'confirmed'}
+                      disabled={appState === 'confirmed' || inputDisabled}
                     />
                   </div>
                 </div>
               )
             }
 
-            if (msg.type === 'preferences') {
-              return (
-                <div key={msg.id} className="msg-row msg-ai msg-pref-row">
-                  <div className="ai-bubble ai-bubble-pref">
-                    <div className="bubble-text">{msg.text}</div>
-                    {preferences && (
-                      <PreferencePanel
-                        preferences={preferences}
-                        onChange={setPreferences}
-                        onConfirm={handlePreferencesConfirm}
-                      />
-                    )}
-                  </div>
-                </div>
-              )
-            }
-
-            // Text messages
             if (msg.role === 'user') {
               return (
                 <div key={msg.id} className="msg-row msg-user">
@@ -332,7 +407,19 @@ export default function App() {
             )
           })}
 
-          {/* Live progress indicator during streaming */}
+          {showChipEditor && profileChips.length > 0 && (
+            <div className="msg-row msg-ai">
+              <ProfileChips
+                chips={profileChips}
+                editing={appState === 'hil_editing' || appState === 'plans_displayed'}
+                onRemove={handleRemoveChip}
+                onAdd={handleAddChip}
+                onReplan={handleReplan}
+                replanning={isReplanning}
+              />
+            </div>
+          )}
+
           {appState === 'streaming' && progressSteps.length > 0 && (
             <div className="msg-row msg-ai">
               <ProgressIndicator steps={progressSteps} live />
@@ -342,74 +429,26 @@ export default function App() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input area */}
         <InputBar
           onSend={handleSend}
           disabled={inputDisabled}
           placeholder={
             appState === 'confirmed'
               ? '已确认，祝您周末愉快！'
-              : appState === 'preferences'
-                ? '在上方选择偏好，或补充更多信息...'
-                : '说说你的需求，比如几个人、什么时间、想去哪...'
+              : appState === 'hil_editing'
+                ? '或在上方修改偏好后点「重新规划」'
+                : '家庭或朋友出游，说说人数、时间、饮食偏好…'
           }
+        />
+
+        <PreferencePanel
+          open={isPreferencePanelOpen}
+          preferences={panelPreferences}
+          onChange={setPanelPreferences}
+          onClose={() => setIsPreferencePanelOpen(false)}
+          onSubmit={handlePreferenceSubmit}
         />
       </div>
     </div>
   )
-}
-
-/** Build display plan cards from backend data or generate mock plans */
-function buildDisplayPlans(
-  card: { title?: string; share_text?: string; body_markdown?: string } | null,
-  _userInput: string,
-): DisplayPlan[] {
-  // If we have real backend data, try to parse it
-  if (card?.body_markdown) {
-    return [
-      {
-        id: 'plan_1',
-        title: card.title || '推荐方案 A',
-        play: { name: '户外游玩', time: '14:00-16:30', desc: '根据您的偏好推荐', tags: ['户外', '推荐'] },
-        eat: { name: '精选餐厅', time: '17:00-18:30', desc: '匹配您的口味', tags: ['美食', '人气'] },
-        addon: { name: '顺路奶茶', desc: '休息一下', tags: ['饮品'] },
-        totalPrice: '¥298/人',
-        score: 92,
-        highlights: ['评分高', '顺路方便'],
-      },
-      {
-        id: 'plan_2',
-        title: card.title ? `${card.title} B` : '推荐方案 B',
-        play: { name: '城市漫步', time: '14:30-17:00', desc: '轻松休闲路线', tags: ['休闲', '城市'] },
-        eat: { name: '人气美食', time: '17:30-19:00', desc: '高评分餐厅', tags: ['口碑', '地道'] },
-        totalPrice: '¥228/人',
-        score: 87,
-        highlights: ['性价比高', '路线顺畅'],
-      },
-    ]
-  }
-
-  // Fallback: generate mock plans
-  return [
-    {
-      id: 'plan_1',
-      title: '方案 A · 城市探索',
-      play: { name: '南湖公园 · 泛舟游湖', time: '14:00-16:30', desc: '湖面泛舟，绿道骑行，享受户外阳光', tags: ['户外', '运动', '推荐'] },
-      eat: { name: '隐溪·湖畔餐厅', time: '17:00-18:30', desc: '低卡轻食，湖畔景观位，适合减肥餐', tags: ['轻食', '景观', '健康'] },
-      addon: { name: '喜茶 · 南湖店', desc: '顺路自提，新品多肉葡萄', tags: ['饮品', '顺路'] },
-      totalPrice: '¥298/人',
-      score: 92,
-      highlights: ['风景优美', '餐厅健康低卡', '行程顺路不绕'],
-    },
-    {
-      id: 'plan_2',
-      title: '方案 B · 文艺漫游',
-      play: { name: '东山文创园 · 艺术展览', time: '14:30-17:00', desc: '网红打卡地，艺术展览+手作体验', tags: ['文艺', '打卡', '室内'] },
-      eat: { name: '老街坊·私房菜', time: '17:30-19:00', desc: '地道本帮菜，人均亲民，口碑老店', tags: ['地道', '口碑', '高性价比'] },
-      addon: { name: '瑞幸咖啡 · 文创店', desc: '园区内，逛累了来一杯', tags: ['咖啡', '便利'] },
-      totalPrice: '¥228/人',
-      score: 87,
-      highlights: ['拍照出片', '性价比高', '交通便利'],
-    },
-  ]
 }

@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from backend.tools import ToolContext, ToolError, invoke
-from backend.tools.mock_client import reset_mock_backend
+from backend.mock_meituan.backend import reset_mock_backend
 from backend.nodes.executor import executor_node
 from backend.nodes.dry_run import dry_run_node
 from backend.nodes.planner import planner_node

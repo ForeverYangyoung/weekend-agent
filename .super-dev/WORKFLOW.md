@@ -1,6 +1,6 @@
 # Super Dev · 美团六（weekend-agent）工作流映射
 
-> 本仓库已合并 Super Dev 治理层。**代码真源**在 `apps/api/weekend_agent/`；**需求/架构真源**在根目录 `01`、`02`。
+> 本仓库已合并 Super Dev 治理层。**代码真源**在 `backend/`；**需求/架构真源**在根目录 `01`、`02`。
 
 ## 文档真源（Canonical）
 
@@ -9,7 +9,7 @@
 | `output/*-prd.md` | [`01-题目工程拆解.md`](../01-题目工程拆解.md) | 赛题 PRD、Mock API、场景 A/B、NFR |
 | `output/*-architecture.md` | [`02.架构和agent.md`](../02.架构和agent.md) | Profiler / Planner / Executor、State、打分 |
 | `output/*-research.md` | （Super Dev 生成） | 竞品调研；写入 `output/`，不覆盖 01/02 |
-| `output/*-uiux.md` | （Super Dev 生成） | 答辩 UI；当前仅有 `apps/api/.../playground.html` 可作参考 |
+| `output/*-uiux.md` | （Super Dev 生成） | 答辩 UI；参考 `frontend-v2/` |
 
 ### 同步规则
 
@@ -21,32 +21,22 @@
 
 | 路径 | 说明 |
 |------|------|
-| `apps/api/weekend_agent/` | LangGraph、`app.py`、SSE、`playground`、各 `nodes/*` |
-| `apps/api/weekend_agent/state.py` | State 字段见 [`docs/graph-states.md`](../docs/graph-states.md) |
+| `backend/` | LangGraph、`server.py`、SSE、各 `nodes/*` |
+| `backend/state.py` | State 字段见 [`docs/graph-states.md`](../docs/graph-states.md) |
+| `frontend-v2/` | React 答辩 UI |
 
-禁止用空壳 `main.py` 或 D 盘脚手架覆盖上述实现。
+禁止用空壳脚手架覆盖上述实现。
 
 ## 推荐命令（黑客松）
 
 ```text
 /super-dev-seeai
 赛题06周末活动规划。PRD/架构以 01、02 为准。
-P0：答辩前端对接现有 API/SSE；后端以 apps/api 为准不重写。
+P0：答辩前端对接现有 API/SSE；后端以 backend/ 为准不重写。
 ```
-
-标准全流程、前端单独 preview 门控：使用 `/super-dev ...`。
-
-## Spec 与变更目录
-
-- 用户确认文档后：`.super-dev/changes/<change-id>/proposal.md` + `tasks.md`
-- 运行时状态（不提交）：`.super-dev/workflow-state.json`、`.super-dev/review-state/`
 
 ## 质量与演示
 
 - 门禁清单：[`docs/quality-checklist.md`](../docs/quality-checklist.md)
 - 答辩剧本：[`docs/demo-script.md`](../docs/demo-script.md)
-
-## 后续前端
-
-- 计划目录：`apps/web/`（尚未创建；由 Super Dev SEEAI 在 uiux 确认后初始化）
-- 临时演示：`http://127.0.0.1:8000/playground`（`python -m weekend_agent`）
+- 演示：`python app.py` → `http://127.0.0.1:8000`

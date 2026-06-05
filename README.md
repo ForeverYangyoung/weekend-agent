@@ -1,60 +1,67 @@
-# weekend-agent
-
-[![GitHub](https://img.shields.io/badge/GitHub-ForeverYangyoung%2Fweekend--agent-blue)](https://github.com/ForeverYangyoung/weekend-agent)
+# Weekend Agent
 
 美团 AI Hackathon · 赛题 06：**本地探索 — 周末闲时活动规划 Agent**
 
-一句话描述周末出行需求，Agent 完成「画像 → 规划 → 校验 → 模拟执行 → 行程卡通知」闭环（LangGraph + FastAPI SSE）。
+一句话描述周末出行需求，Agent 完成「画像 → 检索 → 规划 → 校验 → 预检 → 下单 → 行程卡」闭环。
 
 ## 快速开始
 
-```bash
-cd apps/api
+```powershell
+# 1. 后端环境（项目根目录）
 python -m venv .venv
-# Windows PowerShell:
-.venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 pip install -e .
 
-# CLI 演示
-python -m weekend_agent.demo
+# 2. 前端构建
+cd frontend-v2
+npm install
+npm run build
+cd ..
 
-# 启动 API + 浏览器测试页
-python -m weekend_agent
-# 打开 http://127.0.0.1:8000/playground
+# 3. 一键启动
+python app.py
+# 打开 http://127.0.0.1:8000
 ```
 
-详细接口、SSE、失败注入演示见 [apps/api/README.md](apps/api/README.md)。
+**开发模式**（前端热更新）：
 
-## Super Dev（Cursor）
+```powershell
+# 终端 1
+python -m backend
 
-本仓库已接入 Super Dev 流水线（从 `D:\weekend-agent` 迁入配置，**未改动** `apps/api/weekend_agent` 代码）。
-
-| 命令 | 用途 |
-|------|------|
-| `/super-dev …` | 标准流程：调研 → 三文档 → 确认 → 前端优先 → 后端 |
-| `/super-dev-seeai …` | 黑客松快版（推荐答辩 UI） |
-
-- 文档映射：[`.super-dev/WORKFLOW.md`](.super-dev/WORKFLOW.md)
-- PRD / 架构真源：根目录 `01`、`02`；生成物在 `output/`（见 `output/README.md`）
-
-示例：
-
-```text
-/super-dev-seeai 赛题06；01/02 为真源；P0 答辩前端对接现有 SSE；不重写后端。
+# 终端 2
+cd frontend-v2 && npm run dev
+# 打开 http://localhost:3000
 ```
 
-## 仓库结构
+**CLI 终端演示**（答辩逐行 trace）：
+
+```powershell
+python -m backend.demo --scene family
+python -m backend.demo --scene family --fail 吃   # 补偿链演示
+```
+
+## 项目结构
 
 | 路径 | 说明 |
 |------|------|
-| `apps/api/weekend_agent/` | LangGraph 状态机、FastAPI、内置 Playground |
+| `backend/` | LangGraph 状态机、FastAPI、Mock 美团 API |
+| `frontend-v2/` | React 答辩 UI（SSE 对接） |
+| `planner/` | 规划引擎子模块（顺路活动、时间轴） |
 | `01-题目工程拆解.md` | 赛题 PRD / Mock API 契约 |
 | `02.架构和agent.md` | 架构与 Agent 设计 |
-| `03.细节实现.md` | 已落地亮点 vs 原队友设计、困难项清单 |
-| `04.第一阶段展示.md` | PyCharm 跑通步骤 + 逐节点输入输出串讲 |
-| `.cursor/commands/` | Super Dev 斜杠命令 |
-| `docs/` | 索引、质量门禁、Demo 剧本 |
+| `03.细节实现.md` | 已落地亮点 |
+| `04.第一阶段展示.md` | CLI 跑通记录与答辩话术 |
 
-## 在线演示
+## API
 
-本地启动后访问：`http://127.0.0.1:8000/playground`（需先运行 `python -m weekend_agent`）。
+| 端点 | 说明 |
+|------|------|
+| `GET /` | React 前端 |
+| `GET /health` | 健康检查 |
+| `POST /v1/agent/stream` | 规划 + 预检（HIL 暂停，待确认） |
+| `POST /v1/agent/replan` | 点改偏好后从 Researcher 重跑 |
+| `POST /v1/agent/confirm` | 用户确认后真实下单 |
+| `GET /mock-meituan/*` | Mock 美团 HTTP API |
+
+详细 Mock 接口见 [docs/mock-api.md](docs/mock-api.md)。

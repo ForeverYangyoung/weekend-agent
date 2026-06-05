@@ -32,5 +32,5 @@
   },
   "updated_at": "2026-05-19T00:00:00+00:00",
   "version": 1,
-  "note": "Migrated from D:\\weekend-agent into 美团六; backend canonical at apps/api/weekend_agent"
+  "note": "Migrated from D:\\weekend-agent into 美团六; backend canonical at backend/"
 }

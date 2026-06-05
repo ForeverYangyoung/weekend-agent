@@ -2,7 +2,7 @@
 
 部署形态：
   - 默认（内联）：`tools.http_client` 用 httpx + ASGITransport 直接打到 `mock_app`，零端口。
-  - 独立：`uvicorn weekend_agent.mock_meituan.app:mock_app --port 8001`，
+  - 独立：`uvicorn backend.mock_meituan.app:mock_app --port 8001`，
           再设 `MOCK_MEITUAN_BASE_URL=http://localhost:8001` 即可让 Agent 走真 TCP。
 
 测试要点：内联 / 独立两种形态下，Agent 代码完全一致；切换只改 env。

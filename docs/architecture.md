@@ -6,9 +6,9 @@
 
 **代码实现：**
 
-- `apps/api/weekend_agent/graph.py` — LangGraph 编排
-- `apps/api/weekend_agent/app.py` — FastAPI、SSE、`/playground`
-- `apps/api/weekend_agent/nodes/` — 各逻辑节点
+- `backend/graph.py` — LangGraph 编排
+- `backend/server.py` — FastAPI、SSE、前端静态资源
+- `backend/nodes/` — 各逻辑节点
 
 Super Dev 增量：`output/weekend-agent-architecture.md`（侧重前端联调、路由、部署）
 
@@ -23,4 +23,4 @@ State 字段清单：[`graph-states.md`](graph-states.md)
 | Executor（含预检/提交/回滚/交付） | `dry_run.py` + `executor.py` + `compensator.py` + `notifier.py` |
 | ToolHub | `tools/`（无独立 graph 节点） |
 
-映射表与 trace 前缀：[`apps/api/weekend_agent/roles.py`](../apps/api/weekend_agent/roles.py)
+映射表与 trace 前缀：[`backend/roles.py`](../backend/roles.py)

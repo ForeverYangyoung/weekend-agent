@@ -14,7 +14,7 @@ from backend.agents import (
     suggest_insertions,
 )
 from backend.roles import trace_line
-from backend.schemas import Plan
+from backend.schemas import Plan, ToolStatus
 from backend.state import AgentState
 
 
@@ -28,6 +28,11 @@ def planner_node(state: AgentState) -> dict:
         for call in state.get("failed_calls", []) or []
         if (call.args or {}).get("poi_id")
     }
+    for call in state.get("dry_run_calls", []) or []:
+        if call.status == ToolStatus.FAILED:
+            pid = (call.args or {}).get("poi_id")
+            if pid:
+                blocked.add(pid)
     blocked.discard(None)
 
     plans: list[Plan] = []
@@ -39,7 +44,7 @@ def planner_node(state: AgentState) -> dict:
 
     if not plans:
         stub = (
-            build_friends_stub()
+            build_friends_stub(profile)
             if profile and profile.scene == "friends"
             else build_family_stub()
         )

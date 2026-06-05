@@ -1,10 +1,10 @@
 """CLI 演示入口。
 
 用法：
-    python -m weekend_agent.demo                       # 默认家庭场景
-    python -m weekend_agent.demo --scene friends       # 朋友场景
-    python -m weekend_agent.demo --fail 吃              # 注入"吃"阶段失败，演示补偿链
-    python -m weekend_agent.demo --history             # 注入历史偏好（川菜/亲子）
+    python -m backend.demo                       # 默认家庭场景
+    python -m backend.demo --scene friends       # 朋友场景
+    python -m backend.demo --fail 吃              # 注入"吃"阶段失败，演示补偿链
+    python -m backend.demo --history             # 注入历史偏好（川菜/亲子）
 """
 from __future__ import annotations
 

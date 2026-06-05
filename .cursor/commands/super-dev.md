@@ -2,7 +2,7 @@
 
 在当前项目触发 Super Dev 的流水线式开发编排。
 
-> **本仓库：** 先读 [`.super-dev/WORKFLOW.md`](../../.super-dev/WORKFLOW.md)。PRD/架构真源为 `01-题目工程拆解.md`、`02.架构和agent.md`；后端真源为 `apps/api/weekend_agent/`。
+> **本仓库：** 先读 [`.super-dev/WORKFLOW.md`](../../.super-dev/WORKFLOW.md)。PRD/架构真源为 `01-题目工程拆解.md`、`02.架构和agent.md`；后端真源为 `backend/`。
 
 ## 输入
 - 需求描述: `$ARGUMENTS`
@@ -42,7 +42,7 @@
    - `.super-dev/changes/*/proposal.md`
    - `.super-dev/changes/*/tasks.md`
 5. 先按 `tasks.md` 实现并运行前端，确保前端可演示、可审查、无明显错误。
-6. 再实现后端、联调、测试、质量门禁与可审计交付清单（**勿覆盖**已有 `apps/api/weekend_agent/` 实现，仅扩展/联调）。
+6. 再实现后端、联调、测试、质量门禁与可审计交付清单（**勿覆盖**已有 `backend/` 实现，仅扩展/联调）。
 
 ## 宿主执行方式（优先）
 - `/super-dev` 触发后，直接留在宿主里继续当前流程，不要把正常开发再转发成 `super-dev pipeline`。

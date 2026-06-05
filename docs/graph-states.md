@@ -1,6 +1,6 @@
 # LangGraph State
 
-与代码 [`apps/api/weekend_agent/state.py`](../apps/api/weekend_agent/state.py) 对齐。
+与代码 [`backend/state.py`](../backend/state.py) 对齐。
 
 | 字段 | 说明 |
 |------|------|

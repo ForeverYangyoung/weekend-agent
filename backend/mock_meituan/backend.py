@@ -47,6 +47,15 @@ class MockBackend:
         people: int,
         force_fail: str | None = None,
     ) -> dict:
+        # 朋友场景 4 人聚餐陷阱：热门烤肉店无大桌 → 演示预检失败后换备选
+        if poi_id == "poi_rest_201" and people >= 4:
+            return {
+                "available": False,
+                "waiting_minutes": 120,
+                "poi_id": poi_id,
+                "mock": True,
+                "reason": "4人桌已满，建议换备选餐厅",
+            }
         if force_fail == "table_full" or poi_id in ALWAYS_FULL_POIS:
             return {
                 "available": False,
@@ -123,6 +132,8 @@ class MockBackend:
         poi_id: str,
         idempotency_key: str,
         items: list | None = None,
+        delivery_address: str | None = None,
+        deliver_to_poi_id: str | None = None,
         force_fail: str | None = None,
     ) -> dict:
         existing = self._idempotent_hit(idempotency_key)
@@ -131,10 +142,13 @@ class MockBackend:
         if force_fail == "out_of_stock":
             raise ToolError(409, "加餐下单失败：库存不足", details={"poi_id": poi_id})
         order_id = self._new_order_id()
+        deliver_target = deliver_to_poi_id or delivery_address
         body = {
             "order_id": order_id,
             "eta_minutes": 25,
             "total": 68,
+            "deliver_to_poi_id": deliver_target,
+            "delivery_address": deliver_target,
             "mock": True,
         }
         self._remember_order(order_id, "food", body, idempotency_key)

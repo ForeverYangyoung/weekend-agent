@@ -11,7 +11,7 @@ alwaysApply: true
 - Summarize the three core documents to the user and wait for user confirmation before creating Spec/tasks or writing code.
 - Create Spec/tasks only after confirmation.
 - Execute frontend-first delivery before backend/database tasks, then run quality gate before release.
-- Do not rewrite `apps/api/weekend_agent/` from scratch; integrate with existing LangGraph nodes and `/playground` SSE.
+- Do not rewrite `backend/` from scratch; integrate with existing LangGraph nodes and SSE.
 - Before any UI implementation, first lock the icon library, typography, design token system, component ecosystem, and page skeleton from output/*-uiux.md.
 - Do not use emoji as functional icons or placeholders.
 - For non-conversational AI products, avoid Claude / ChatGPT-style sidebar chat shells unless the UI plan explicitly justifies them.

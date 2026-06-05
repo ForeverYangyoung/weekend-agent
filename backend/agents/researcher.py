@@ -184,7 +184,9 @@ def _score_preference(c: POICandidate, profile: GroupProfile) -> float:
         target |= {"朋友", "聚餐"}
     if not target:
         return 0.5
-    haystack = f"{c.name} {c.category} {c.reason}".lower()
+    tags = c.metadata.get("tags") or []
+    tag_str = " ".join(str(t) for t in tags)
+    haystack = f"{c.name} {c.category} {c.reason} {tag_str}".lower()
     hits = _hit_in_text(haystack, target)
     return min(1.0, hits / max(len(target), 1) * 2)
 
@@ -261,6 +263,18 @@ def _rank_and_filter(
 
     if not kept:
         return []
+
+    if profile.district:
+        district_key = profile.district.replace("区", "")
+        district_hits = [
+            c
+            for c in kept
+            if c.metadata.get("district") == profile.district
+            or district_key in c.name
+            or district_key in c.reason
+        ]
+        if district_hits:
+            kept = district_hits
 
     kept.sort(
         key=lambda x: (x.breakdown.total if x.breakdown else 0.0), reverse=True

@@ -36,12 +36,22 @@ def plan_to_dry_run_calls(plan: Plan, *, people: int = 4) -> list[ToolCall]:
                 )
             )
         elif stage.name == "加餐":
+            meta = stage.primary.metadata or {}
+            deliver_to = meta.get("deliver_to_poi_id") or meta.get("target_restaurant")
+            if not deliver_to:
+                eat_stage = next((s for s in plan.stages if s.name == "吃"), None)
+                if eat_stage is not None:
+                    deliver_to = eat_stage.primary.poi_id
+            addon_args: dict = {"poi_id": stage.primary.poi_id}
+            if deliver_to:
+                addon_args["delivery_address"] = deliver_to
+                addon_args["deliver_to_poi_id"] = deliver_to
             calls.append(
                 ToolCall(
                     id=f"tc_{uuid4().hex[:8]}",
                     stage_name=stage.name,
                     tool_name="check_addon_stock",
-                    args={"poi_id": stage.primary.poi_id},
+                    args=addon_args,
                 )
             )
     return calls

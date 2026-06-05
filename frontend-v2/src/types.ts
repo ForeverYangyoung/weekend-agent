@@ -1,12 +1,48 @@
 /** SSE event from the backend streaming endpoint */
 export interface SSEEvent {
-  event: 'start' | 'state' | 'final' | 'done' | 'error'
+  event: 'start' | 'state' | 'final' | 'awaiting_confirm' | 'done' | 'error'
   user_input?: string
+  session_id?: string
+  replan?: boolean
   force_failure?: string | null
   state?: AgentStatePayload
   summary?: SummaryPayload
   summary_card?: SummaryCard
+  profile_chips?: ProfileChip[]
+  plans?: BackendPlanPayload[]
+  dry_run_calls?: unknown[]
   message?: string
+}
+
+export interface ProfileChip {
+  key: string
+  label: string
+  value: string
+  confidence?: number
+  editable?: boolean
+  source?: string
+}
+
+export interface ProfileOverride {
+  key: string
+  value: string
+  action: 'add' | 'remove' | 'set'
+}
+
+export interface BackendPlanPayload {
+  id: string
+  title: string
+  order_label?: string
+  score?: number
+  totalPrice?: string
+  highlights?: string[]
+  matchReasons?: string[]
+  constraintIssues?: string[]
+  isValid?: boolean
+  diffSummary?: string
+  play?: { name: string; time: string; desc: string; tags: string[]; priceLabel?: string; distanceLabel?: string }
+  eat?: { name: string; time: string; desc: string; tags: string[]; priceLabel?: string; distanceLabel?: string }
+  addon?: { name: string; desc: string; tags: string[]; priceLabel?: string; distanceLabel?: string }
 }
 
 export interface AgentStatePayload {
@@ -76,15 +112,48 @@ export interface ChatMessage {
   timestamp: number
 }
 
+export interface PlanVenue {
+  name: string
+  time: string
+  desc: string
+  tags: string[]
+  priceLabel?: string
+  distanceLabel?: string
+}
+
+export interface PlanTimelineItem {
+  kind: 'play' | 'eat' | 'addon'
+  label: string
+  time: string
+  name: string
+  desc: string
+  priceLabel?: string
+  distanceLabel?: string
+  tags: string[]
+}
+
 export interface DisplayPlan {
   id: string
   title: string
-  play: { name: string; time: string; desc: string; tags: string[] }
-  eat: { name: string; time: string; desc: string; tags: string[] }
+  orderLabel: string
+  venueChain: string
+  diffSummary: string
+  play: PlanVenue
+  eat: PlanVenue
   addon?: { name: string; desc: string; tags: string[] }
+  timeline: PlanTimelineItem[]
   totalPrice: string
   score: number
   highlights: string[]
+  matchReasons: string[]
+  constraintIssues: string[]
+  isValid: boolean
+}
+
+export interface PanelPreferences {
+  distance: string
+  diet: string
+  vibe: string
 }
 
 export interface ProgressStep {
@@ -126,5 +195,6 @@ export type AppState =
   | 'idle'
   | 'streaming'
   | 'plans_displayed'
+  | 'hil_editing'
   | 'preferences'
   | 'confirmed'
