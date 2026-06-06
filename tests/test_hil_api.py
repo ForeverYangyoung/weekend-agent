@@ -116,6 +116,26 @@ def test_hil_replan_with_override() -> None:
     assert session_id in buf
 
 
+def test_stream_with_initial_overrides_adds_hotpot_to_family() -> None:
+    c = TestClient(app)
+    buf = ""
+    with c.stream(
+        "POST",
+        "/v1/agent/stream",
+        json={
+            "user_input": "今天下午带老婆孩子出去玩，孩子5岁，别太远，帮我安排一下",
+            "overrides": [{"key": "dietary", "value": "火锅", "action": "add"}],
+        },
+    ) as resp:
+        assert resp.status_code == 200
+        for chunk in resp.iter_text():
+            buf += chunk
+
+    assert "awaiting_confirm" in buf
+    assert "火锅" in buf
+    assert "HIL" in buf or "重规划" in buf or "覆盖" in buf
+
+
 def test_hil_confirm_returns_orders() -> None:
     c = TestClient(app)
     session_id, _ = _stream_until_confirm(

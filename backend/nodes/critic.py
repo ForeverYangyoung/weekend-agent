@@ -91,15 +91,29 @@ def critic_node(state: AgentState) -> dict:
     approved = not any(i.severity == "block" for i in issues)
     feedback = CriticFeedback(approved=approved, issues=issues)
 
+    trace_msgs = [
+        trace_line(
+            "Critic",
+            f"approved={approved} issues={len(issues)} "
+            + ("✓" if approved else "✗ 触发重规划"),
+            phase="校验",
+        )
+    ]
+    if plan and any(s.name == "加餐" for s in plan.stages):
+        addon = next(s for s in plan.stages if s.name == "加餐")
+        eat = next((s for s in plan.stages if s.name == "吃"), None)
+        deliver = (addon.primary.metadata or {}).get("deliver_to_poi_id", "—")
+        trace_msgs.append(
+            trace_line(
+                "Critic",
+                f"并入加餐 {addon.primary.name} → deliver_to_poi_id={deliver}"
+                + (f"（餐厅={eat.primary.name}）" if eat else ""),
+                phase="校验",
+            )
+        )
+
     return {
         **plan_updates,
         "critic_feedback": feedback,
-        "trace": [
-            trace_line(
-                "Critic",
-                f"approved={approved} issues={len(issues)} "
-                + ("✓" if approved else "✗ 触发重规划"),
-                phase="校验",
-            )
-        ],
+        "trace": trace_msgs,
     }

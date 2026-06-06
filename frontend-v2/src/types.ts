@@ -1,10 +1,14 @@
 /** SSE event from the backend streaming endpoint */
 export interface SSEEvent {
-  event: 'start' | 'state' | 'final' | 'awaiting_confirm' | 'done' | 'error'
+  event: 'start' | 'state' | 'step' | 'trace_delta' | 'final' | 'awaiting_confirm' | 'done' | 'error'
   user_input?: string
   session_id?: string
   replan?: boolean
   force_failure?: string | null
+  step?: string
+  trace_delta?: string[]
+  lines?: string[]
+  note?: string
   state?: AgentStatePayload
   summary?: SummaryPayload
   summary_card?: SummaryCard

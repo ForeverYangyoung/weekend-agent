@@ -36,6 +36,8 @@ from backend.nodes import (
     researcher_node,
     targeted_researcher_node,
 )
+
+_hil_apply = hil_apply_overrides_node
 from backend.schemas import ToolStatus
 from backend.state import AgentState
 
@@ -158,6 +160,7 @@ def build_planning_graph():
     """HIL 阶段一：规划 + 预检，暂停在 dry_run（待用户确认）。"""
     g = StateGraph(AgentState)
     g.add_node("profiler", profiler_node)
+    g.add_node("hil_apply", _hil_apply)
     g.add_node("researcher", researcher_node)
     g.add_node("planner", planner_node)
     g.add_node("targeted_researcher", targeted_researcher_node)
@@ -165,7 +168,9 @@ def build_planning_graph():
     g.add_node("dry_run", dry_run_node)
 
     g.add_edge(START, "profiler")
-    _wire_planning_edges(g)
+    g.add_edge("profiler", "hil_apply")
+    g.add_edge("hil_apply", "researcher")
+    _wire_after_researcher(g)
     g.add_edge("dry_run", END)
     return g.compile()
 

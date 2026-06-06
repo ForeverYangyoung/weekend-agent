@@ -33,6 +33,7 @@ from backend.hil import (
     select_plan,
 )
 from backend.mock_meituan import mock_router
+from backend.roles import trace_line
 from backend.state import AgentState
 from backend.tools.http_client import current_mode
 
@@ -119,6 +120,7 @@ class ProfileOverrideItem(BaseModel):
 class StreamAgentRequest(BaseModel):
     user_input: str = Field(..., min_length=1, max_length=8000)
     force_failure: Literal["玩", "吃", "加餐"] | None = None
+    overrides: list[ProfileOverrideItem] = Field(default_factory=list)
 
 
 class ReplanAgentRequest(BaseModel):
@@ -130,6 +132,34 @@ class ReplanAgentRequest(BaseModel):
 class ConfirmAgentRequest(BaseModel):
     session_id: str = Field(..., min_length=8, max_length=32)
     plan_id: str = "primary"
+
+
+def _merge_stream_update(running: dict[str, Any], update: dict[str, Any] | None) -> None:
+    """把 LangGraph updates 模式下的单步 patch 合并进累积 state。"""
+    if not update:
+        return
+    for key, value in update.items():
+        if key == "trace" and isinstance(value, list):
+            running.setdefault("trace", [])
+            running["trace"].extend(value)
+        else:
+            running[key] = value
+
+
+def _stream_graph_steps(graph, initial: AgentState):
+    """按节点逐步执行图，yield (node_name, trace_delta, running_state)。"""
+    running: dict[str, Any] = dict(initial)
+    running.setdefault("trace", [])
+
+    for chunk in graph.stream(initial, stream_mode="updates"):  # type: ignore[arg-type]
+        if not isinstance(chunk, dict):
+            continue
+        for node_name, update in chunk.items():
+            if update is None:
+                continue
+            _merge_stream_update(running, update)
+            trace_delta = list(update.get("trace") or [])
+            yield node_name, trace_delta, dict(running)
 
 
 def _run_planning_stream(
@@ -150,12 +180,14 @@ def _run_planning_stream(
 
     try:
         last: AgentState | None = None
-        for state in graph.stream(initial, stream_mode="values"):  # type: ignore[arg-type]
-            last = state  # type: ignore[assignment]
+        for node_name, trace_delta, running in _stream_graph_steps(graph, initial):
+            last = running  # type: ignore[assignment]
             yield _sse_line(
                 {
-                    "event": "state",
-                    "state": _json_safe(dict(state)),
+                    "event": "step",
+                    "step": node_name,
+                    "trace_delta": trace_delta,
+                    "state": _json_safe(running),
                 }
             )
 
@@ -163,22 +195,63 @@ def _run_planning_stream(
             yield _sse_line({"event": "error", "message": "未产生任何状态更新"})
             return
 
-        # 预检满座等失败 → 自动从 Planner 换备选（HIL 展示前静默恢复）
+        # 预检满座等失败 → 分步恢复，让 Trace 可见「失败→换店→再预检」
         max_recover = get_settings().max_plan_iterations
         for _ in range(max_recover):
-            dry_failed = any(
-                c.status == ToolStatus.FAILED for c in (last.get("dry_run_calls") or [])
-            )
+            dry_calls = last.get("dry_run_calls") or []
+            dry_failed = [c for c in dry_calls if c.status == ToolStatus.FAILED]
             if not dry_failed:
                 break
-            last = dry_run_recovery_graph.invoke(last)  # type: ignore[arg-type]
+
+            plan = last.get("plan")
+            poi_names: dict[str, str] = {}
+            if plan is not None:
+                poi_names = {s.primary.poi_id: s.primary.name for s in plan.stages}
+
+            failed_parts: list[str] = []
+            for c in dry_failed:
+                pid = (c.args or {}).get("poi_id") or "?"
+                pname = poi_names.get(pid, pid)
+                reason = c.error or "不可用"
+                if c.result and c.result.get("reason"):
+                    reason = str(c.result["reason"])
+                people_n = (c.args or {}).get("people", "?")
+                failed_parts.append(
+                    f"{pname}({pid}) people={people_n} → {reason}"
+                )
+
+            recovery_line = trace_line(
+                "DryRun",
+                "Recovery启动 | "
+                + "；".join(failed_parts)
+                + " | action=Planner拉黑该POI并换备选(如炙烤大叔)",
+                phase="恢复",
+            )
+            running_trace = list(last.get("trace") or [])
+            running_trace.append(recovery_line)
+            last = {**last, "trace": running_trace}  # type: ignore[misc]
             yield _sse_line(
                 {
-                    "event": "state",
-                    "state": _json_safe(dict(last)),
-                    "note": "dry_run_recovery",
+                    "event": "trace_delta",
+                    "lines": [recovery_line],
+                    "note": "dry_run_recovery_start",
                 }
             )
+
+            for node_name, trace_delta, running in _stream_graph_steps(
+                dry_run_recovery_graph,
+                last,  # type: ignore[arg-type]
+            ):
+                last = running  # type: ignore[assignment]
+                yield _sse_line(
+                    {
+                        "event": "step",
+                        "step": f"recovery/{node_name}",
+                        "trace_delta": trace_delta,
+                        "state": _json_safe(running),
+                        "note": "dry_run_recovery",
+                    }
+                )
 
         sid = session_id or create_session(last)
         save_session(sid, last)
@@ -211,6 +284,7 @@ def _run_stream(req: StreamAgentRequest) -> Iterator[str]:
     initial: AgentState = {
         "user_input": req.user_input.strip(),
         "trace": [],
+        "profile_overrides": [o.model_dump() for o in req.overrides],
     }
     if req.force_failure:
         initial["force_failure"] = req.force_failure
@@ -305,6 +379,7 @@ def confirm_agent(req: ConfirmAgentRequest) -> dict[str, object]:
         "failed": len(final.get("failed_calls") or []),
         "orders": orders,
         "summary_card": _json_safe(final.get("summary_card")),
+        "trace": _json_safe(final.get("trace") or []),
         "trace_tail": (final.get("trace") or [])[-6:],
     }
 

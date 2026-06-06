@@ -47,13 +47,44 @@ def dry_run_node(state: AgentState) -> dict:
     ctx = ToolContext(force_failure_stage=state.get("force_failure"))
     calls = [_run_read_call(c, ctx) for c in plan_to_dry_run_calls(plan, people=people)]
 
+    poi_names = {s.primary.poi_id: s.primary.name for s in plan.stages}
+    trace_msgs: list[str] = []
+
+    for call in calls:
+        pid = (call.args or {}).get("poi_id", "?")
+        pname = poi_names.get(pid, pid)
+        if call.status == ToolStatus.FAILED:
+            reason = call.error or "未知原因"
+            waiting = None
+            if call.result:
+                reason = str(call.result.get("reason") or reason)
+                waiting = call.result.get("waiting_minutes")
+            people_n = (call.args or {}).get("people", people)
+            rule_hint = ""
+            if pid == "poi_rest_201" and int(people_n or 0) >= 4:
+                rule_hint = " | mock_trap=朋友4人+poi_rest_201→满座"
+            wait_hint = f" | wait={waiting}min" if waiting is not None else ""
+            trace_msgs.append(
+                trace_line(
+                    "DryRun",
+                    f"FAIL 店={pname}({pid}) people={people_n} | tool={call.tool_name}"
+                    f" | reason={reason}{wait_hint}{rule_hint}",
+                    phase="预检",
+                )
+            )
+        else:
+            trace_msgs.append(
+                trace_line(
+                    "DryRun",
+                    f"OK  店={pname}({pid}) | tool={call.tool_name} | available/in_stock=true",
+                    phase="预检",
+                )
+            )
+
     ok = sum(1 for c in calls if c.status == ToolStatus.OK)
     fail = len(calls) - ok
-    msg = f"打听 {len(calls)} 项：{ok} 可执行"
-    if fail:
-        msg += f"，{fail} 不可用 ✗"
-    else:
-        msg += " ✓"
-    trace = trace_line("Executor", msg, phase="预检")
+    summary = f"汇总 checked={len(calls)} ok={ok} fail={fail}"
+    summary += " ✓" if fail == 0 else " ✗"
+    trace_msgs.append(trace_line("DryRun", summary, phase="预检"))
 
-    return {"dry_run_calls": calls, "trace": [trace]}
+    return {"dry_run_calls": calls, "trace": trace_msgs}

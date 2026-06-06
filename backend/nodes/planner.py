@@ -16,6 +16,7 @@ from backend.agents import (
 from backend.roles import trace_line
 from backend.schemas import Plan, ToolStatus
 from backend.state import AgentState
+from backend.trace_compare import format_plan_board
 
 
 def planner_node(state: AgentState) -> dict:
@@ -75,10 +76,12 @@ def planner_node(state: AgentState) -> dict:
     else:
         line = trace_line("Planner", f"首次规划：{detail}{insertion_detail}")
 
+    compare_lines = format_plan_board(plans, blocked=blocked, iteration=iteration)
+
     return {
         "plan": primary,
         "plan_alternatives": alternatives,
         "plan_iteration": iteration + 1,
         "targeted_search_requests": insertion_requests,
-        "trace": [line],
+        "trace": [line, *compare_lines],
     }

@@ -31,12 +31,14 @@ async function* readSSE(res: Response): AsyncGenerator<SSEEvent> {
 export async function* streamAgent(
   userInput: string,
   forceFailure?: string | null,
+  overrides: ProfileOverride[] = [],
 ): AsyncGenerator<SSEEvent> {
   const res = await fetch('/v1/agent/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       user_input: userInput,
+      overrides,
       ...(forceFailure ? { force_failure: forceFailure } : {}),
     }),
   })
@@ -68,6 +70,7 @@ export interface ConfirmResult {
   failed: number
   orders: Array<{ stage: string; order_id: string; status: string }>
   summary_card?: { title?: string; share_text?: string; body_markdown?: string }
+  trace?: string[]
   trace_tail?: string[]
 }
 

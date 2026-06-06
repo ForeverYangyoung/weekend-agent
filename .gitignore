@@ -41,9 +41,8 @@ out/
 !.cursor/rules/
 !.cursor/rules/**
 
-# Super Dev generated artifacts (see output/README.md)
+# Super Dev generated artifacts
 output/*
-!output/README.md
 !output/weekend-agent-bootstrap.md
 
 # Super Dev runtime state (local only)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from backend.agents import run_targeted_research
 from backend.roles import trace_line
 from backend.state import AgentState
+from backend.trace_compare import format_research_boards
 
 
 def targeted_researcher_node(state: AgentState) -> dict:
@@ -29,7 +30,8 @@ def targeted_researcher_node(state: AgentState) -> dict:
     if selected:
         msg += f"｜{selected}"
 
+    board_lines = format_research_boards(research, top_n=3, role="TargetedResearcher")
     return {
         "targeted_research_result": research,
-        "trace": [trace_line("TargetedResearcher", msg)],
+        "trace": [trace_line("TargetedResearcher", msg), *board_lines],
     }

@@ -22,7 +22,7 @@
 | 路径 | 说明 |
 |------|------|
 | `backend/` | LangGraph、`server.py`、SSE、各 `nodes/*` |
-| `backend/state.py` | State 字段见 [`docs/graph-states.md`](../docs/graph-states.md) |
+| `backend/state.py` | State 字段见 [`02.架构和agent.md`](../02.架构和agent.md) 第 6 节 |
 | `frontend-v2/` | React 答辩 UI |
 
 禁止用空壳脚手架覆盖上述实现。
@@ -37,6 +37,5 @@ P0：答辩前端对接现有 API/SSE；后端以 backend/ 为准不重写。
 
 ## 质量与演示
 
-- 门禁清单：[`docs/quality-checklist.md`](../docs/quality-checklist.md)
-- 答辩剧本：[`docs/demo-script.md`](../docs/demo-script.md)
-- 演示：`python app.py` → `http://127.0.0.1:8000`
+- 已落地对照：[`03.细节实现.md`](../03.细节实现.md)
+- 答辩演示：[`README.md`](../README.md)「答辩演示」节；`python app.py` → `http://127.0.0.1:8000`

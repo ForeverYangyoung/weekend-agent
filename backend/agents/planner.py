@@ -354,7 +354,10 @@ def merge_targeted_addon(
         updated = plan.model_copy(update={"stages": stages})
         return updated
 
-    addon_result = next((s for s in targeted.stages if s.stage_name == "加餐"), None)
+    addon_result = next(
+        (s for s in targeted.stages if s.stage_name.startswith("加餐")),
+        None,
+    )
     if addon_result is None or addon_result.selected is None:
         return plan
 

@@ -22,6 +22,7 @@ from backend.tools.errors import ToolError
 from backend.tools.http_client import search_poi
 
 _TOP_K = 3
+_TOP_K_EAT_WITH_HARD_CONSTRAINT = 8
 
 _WEIGHTS: dict[str, float] = {
     "preference": 0.35,
@@ -279,4 +280,9 @@ def _rank_and_filter(
     kept.sort(
         key=lambda x: (x.breakdown.total if x.breakdown else 0.0), reverse=True
     )
+
+    # 吃阶段若用户给了明确饮食约束（如 川菜/火锅/轻食），
+    # 不要在 Researcher 就过早裁掉长尾候选；留给 Planner 做硬过滤与组合。
+    if stage_name == "吃" and profile.dietary:
+        return kept[:_TOP_K_EAT_WITH_HARD_CONSTRAINT]
     return kept[:_TOP_K]

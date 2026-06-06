@@ -18,6 +18,8 @@ def hil_apply_overrides_node(state: AgentState) -> dict:
         }
 
     if not overrides:
+        if state.get("plan") is None:
+            return {}
         return {
             **clear_planning_artifacts(),
             "trace": [trace_line("HIL", "无覆盖项，按原画像重搜", phase="重规划")],

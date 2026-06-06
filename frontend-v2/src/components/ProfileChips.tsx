@@ -8,6 +8,7 @@ interface Props {
   onAdd: (override: ProfileOverride) => void
   onReplan: () => void
   replanning?: boolean
+  replanLabel?: string
 }
 
 const CUISINE_HINTS = ['重口味', '川菜', '火锅', '粤菜', '日料', '轻食', '烤肉']
@@ -53,6 +54,7 @@ export function ProfileChips({
   onAdd,
   onReplan,
   replanning,
+  replanLabel = '按新偏好重新规划',
 }: Props) {
   function handleAddInput(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -129,7 +131,7 @@ export function ProfileChips({
             onClick={onReplan}
             disabled={replanning}
           >
-            {replanning ? '重新规划中…' : '按新偏好重新规划'}
+            {replanning ? '规划中…' : replanLabel}
           </button>
         </>
       )}

@@ -26,10 +26,10 @@ export function PlanCard({
 
   const badgeLabel =
     plan.issueKind === 'needs_preference_fix'
-      ? '待改偏好'
+      ? '等你调整'
       : plan.issueKind === 'alternative_available'
-        ? '就近替代'
-        : '需重规划'
+        ? '附近暂无'
+        : '正在换方案'
 
   const issuePanelClass =
     plan.issueKind === 'needs_preference_fix'
@@ -49,7 +49,7 @@ export function PlanCard({
 
       {plan.activeConstraints.length > 0 && (
         <div className="plan-active-constraints">
-          <div className="plan-active-constraints-label">当前生效约束</div>
+          <div className="plan-active-constraints-label">我会重点照顾</div>
           <div className="plan-active-constraints-tags">
             {plan.activeConstraints.map((c, i) => (
               <span key={`${c}-${i}`} className="active-constraint-tag">{c}</span>
@@ -78,18 +78,24 @@ export function PlanCard({
 
       {plan.issueKind === 'alternative_available' && alternativeAccepted && (
         <div className="plan-issue-panel plan-issue-panel-accepted">
-          <div className="plan-issue-label">已接受就近替代方案，可以下单</div>
+          <div className="plan-issue-label">好的，已按就近替代方案继续，可以下单</div>
         </div>
       )}
 
       {plan.matchReasons.length > 0 && (
         <div className="plan-match-reasons">
-          <div className="plan-match-label">约束命中（Profiler → Planner → Critic）</div>
+          <div className="plan-match-label">为什么推荐这条路线</div>
           <div className="plan-match-tags">
             {plan.matchReasons.map((r, i) => (
               <span key={i} className="match-tag">{r}</span>
             ))}
           </div>
+        </div>
+      )}
+
+      {plan.addon && canOrder && (
+        <div className="plan-helper-note">
+          已顺手安排加餐送到餐厅，玩完过去吃饭时不用再绕路取。
         </div>
       )}
 
@@ -116,7 +122,7 @@ export function PlanCard({
             onClick={() => onAcceptAlternative?.(plan.id)}
             disabled={disabled}
           >
-            接受替代方案
+            接受这个替代
           </button>
         )}
         <button
@@ -127,7 +133,7 @@ export function PlanCard({
           onClick={onEditPreference}
           disabled={disabled}
         >
-          {plan.issueKind === 'needs_preference_fix' ? '修改矛盾偏好' : '修改偏好重提'}
+          {plan.issueKind === 'needs_preference_fix' ? '调整一下偏好' : '换个偏好再试'}
         </button>
         <button
           type="button"
@@ -140,12 +146,12 @@ export function PlanCard({
           disabled={confirmDisabled}
         >
           {canOrder
-            ? '选这个（一键下单）'
+            ? '就选这个，帮我下单'
             : plan.issueKind === 'needs_preference_fix'
-              ? '请先改偏好'
+              ? '先调一下偏好'
               : plan.issueKind === 'alternative_available'
-                ? '或先接受替代'
-                : '先重新规划'}
+                ? '先确认替代'
+                : '正在换更合适的方案'}
         </button>
       </div>
     </div>

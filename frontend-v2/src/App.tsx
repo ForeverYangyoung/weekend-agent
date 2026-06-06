@@ -10,12 +10,16 @@ import type {
 } from './types'
 import { confirmAgent, replanAgent, streamAgent } from './api'
 import { mapPlansFromBackend } from './mapPlans'
+import { SCENARIO_PRESETS, type ScenarioId } from './scenarioPresets'
 import { InputBar } from './components/InputBar'
 import { WelcomeScreen } from './components/WelcomeScreen'
 import { ProgressIndicator } from './components/ProgressIndicator'
 import { PlanCards } from './components/PlanCards'
 import { PreferencePanel } from './components/PreferencePanel'
 import { ProfileChips } from './components/ProfileChips'
+import { ScenarioSetup } from './components/ScenarioSetup'
+import { TracePanel } from './components/TracePanel'
+import { uiTraceLine } from './traceUi'
 
 const DEFAULT_PANEL_PREFS = {
   distance: '5公里内',
@@ -29,22 +33,18 @@ const INITIAL_MESSAGES: ChatMessage[] = [
     role: 'ai',
     type: 'welcome',
     text:
-      '嗨，我是你的周末小助手。支持家庭出游和朋友聚会两种场景：\n我会先预检可订资源，你确认后再一键下单。\n\n家庭场景：请带上人数及特殊要求（如：带5岁娃，需要健康餐）\n\n朋友场景：请告诉我人数和口味偏好（如：4个人，想吃重口味）',
+      '嗨，我是你的周末小助手。\n\n答辩演示：左侧对话规划，右侧实时 Trace。\n先选「家庭」或「朋友」场景，再补充偏好（例如家庭也可加火锅），满意后确认下单。',
     timestamp: Date.now(),
   },
 ]
 
-const SUGGESTED_PROMPTS = [
-  '我下午想和老婆孩子一起出去玩，老婆正在减肥，孩子5岁',
-  '下午和三个朋友一起出去，4个人，别太远，想吃重口味',
-]
-
 const TRACE_PROGRESS: Array<{ prefix: string; label: string }> = [
   { prefix: '[Profiler]', label: '正在理解您的出行画像…' },
-  { prefix: '[Researcher]', label: '正在搜索游玩与餐厅候选…' },
-  { prefix: '[Planner]', label: '正在规划行程顺序…' },
-  { prefix: '[TargetedResearcher]', label: '正在补充顺路小店…' },
-  { prefix: '[Executor·预检]', label: '正在打听票位与库存…' },
+  { prefix: '[Researcher', label: '正在召回并对比候选店…' },
+  { prefix: '[Planner', label: '正在组合并对比方案…' },
+  { prefix: '[TargetedResearcher', label: '正在补充顺路加餐…' },
+  { prefix: '[Critic', label: '正在规则校验…' },
+  { prefix: '[Executor·预检]', label: '正在预检票位与库存…' },
 ]
 
 function genId() {
@@ -129,9 +129,12 @@ function panelToOverrides(prefs: typeof DEFAULT_PANEL_PREFS): ProfileOverride[] 
 export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES)
   const [appState, setAppState] = useState<
-    'idle' | 'streaming' | 'plans_displayed' | 'hil_editing' | 'confirmed'
+    'idle' | 'scenario_setup' | 'streaming' | 'plans_displayed' | 'hil_editing' | 'confirmed'
   >('idle')
+  const [activeScenario, setActiveScenario] = useState<ScenarioId | null>(null)
   const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([])
+  const [traceLines, setTraceLines] = useState<string[]>([])
+  const [currentTraceStep, setCurrentTraceStep] = useState<string | null>(null)
   const [plans, setPlans] = useState<DisplayPlan[]>([])
   const [profileChips, setProfileChips] = useState<ProfileChip[]>([])
   const [pendingOverrides, setPendingOverrides] = useState<ProfileOverride[]>([])
@@ -158,17 +161,61 @@ export default function App() {
     return full
   }
 
+  function appendTrace(lines: string[]) {
+    if (!lines.length) return
+    setTraceLines((prev) => [...prev, ...lines])
+  }
+
+  function pushUiTrace(phase: string, message: string) {
+    appendTrace([uiTraceLine(phase, message)])
+  }
+
+  function applyTraceDelta(delta: string[] | undefined, fullTrace?: string[]) {
+    if (delta?.length) {
+      appendTrace(delta)
+    } else if (fullTrace?.length) {
+      setTraceLines(fullTrace)
+    }
+    const merged = fullTrace ?? []
+    if (merged.length) {
+      setProgressSteps(progressFromTrace(merged))
+    }
+  }
+
   async function consumePlanningStream(events: AsyncGenerator<SSEEvent>) {
     let awaiting: SSEEvent | null = null
     let lastTrace: string[] = []
 
     for await (const ev of events) {
+      if (ev.event === 'start') {
+        setCurrentTraceStep(null)
+      }
+      if (ev.event === 'step') {
+        if (ev.step) setCurrentTraceStep(ev.step)
+        const full = ev.state?.trace ?? []
+        lastTrace = full
+        applyTraceDelta(ev.trace_delta, full)
+      }
+      if (ev.event === 'trace_delta' && ev.lines?.length) {
+        appendTrace(ev.lines)
+        lastTrace = [...lastTrace, ...ev.lines]
+        setProgressSteps(progressFromTrace(lastTrace))
+      }
       if (ev.event === 'state' && ev.state?.trace) {
         lastTrace = ev.state.trace
+        setTraceLines(lastTrace)
         setProgressSteps(progressFromTrace(lastTrace))
       }
       if (ev.event === 'awaiting_confirm') {
         awaiting = ev
+        setCurrentTraceStep('awaiting_confirm')
+        const planNames = (ev.plans ?? [])
+          .map((p) => p.title ?? p.id)
+          .join(' | ')
+        pushUiTrace(
+          '就绪',
+          `左侧将展示 ${ev.plans?.length ?? 0} 套方案，请用户确认：${planNames}`,
+        )
       }
       if (ev.event === 'error') {
         throw new Error(ev.message ?? '规划失败')
@@ -184,20 +231,30 @@ export default function App() {
     setPreferenceConflicts(awaiting.preference_conflicts ?? [])
     setAcceptedAlternatives(new Set())
     setPendingOverrides([])
+    setActiveScenario(null)
     setPlans(mapPlansFromBackend(awaiting.plans))
     setProgressSteps(progressFromTrace(lastTrace).map((s) => ({ ...s, done: true })))
 
     const chipText = (awaiting.profile_chips ?? []).map((c) => c.label).join('、')
+    const primary = awaiting.plans[0]
+    const primaryIssue = primary?.planIssues?.[0]
     const conflictHint =
       (awaiting.preference_conflicts ?? []).length > 0
         ? '检测到饮食偏好互相矛盾，请先点「修改矛盾偏好」或上方标签调整后再规划。'
         : ''
+    const cuisineHint =
+      primaryIssue?.code === 'cuisine_unavailable'
+        ? primaryIssue.detail
+        : primaryIssue?.code === 'cuisine_not_matched_but_nearby'
+          ? primaryIssue.detail
+          : ''
     const planMsg = addMessage({
       role: 'ai',
       type: 'plans',
       text: conflictHint
+        || cuisineHint
         || (chipText
-          ? `已按约束（${chipText}）筛出 ${awaiting.plans.length} 套不同店组合。绿标是命中说明；若附近暂无指定菜系，会说明距离原因并给替代选项。`
+          ? `已按约束（${chipText}）筛出 ${awaiting.plans.length} 套不同店组合。绿标是命中说明；若指定菜系附近没有店，卡片会写明距离原因。`
           : '预检完成！下方是真实候选方案。可点标签修改偏好后重搜，满意再点「选这个」确认下单。'),
     })
     planMsg.plans = mapPlansFromBackend(awaiting.plans)
@@ -205,6 +262,66 @@ export default function App() {
     setAppState('plans_displayed')
     setInputDisabled(false)
     setIsReplanning(false)
+  }
+
+  function handleScenarioSelect(id: ScenarioId) {
+    if (inputDisabled) return
+    const preset = SCENARIO_PRESETS[id]
+    setActiveScenario(id)
+    pushUiTrace('场景', `用户选择 ${preset.title}（${preset.subtitle}）`)
+    setProfileChips([...preset.defaultChips])
+    setPendingOverrides([])
+    setPanelPreferences(preset.panelPrefs)
+    setPreferenceConflicts([])
+    setAppState('scenario_setup')
+    addMessage({
+      role: 'user',
+      type: 'text',
+      text: `选择场景：${preset.title}`,
+    })
+  }
+
+  function handleCancelScenario() {
+    setActiveScenario(null)
+    setProfileChips([])
+    setPendingOverrides([])
+    setAppState('idle')
+  }
+
+  async function handleStartScenarioPlanning() {
+    if (!activeScenario || inputDisabled) return
+    const preset = SCENARIO_PRESETS[activeScenario]
+    const dietLabels = profileChips.filter((c) => c.key === 'dietary').map((c) => c.label)
+    const extra = dietLabels.length ? `，饮食：${dietLabels.join('、')}` : ''
+
+    addMessage({
+      role: 'user',
+      type: 'text',
+      text: `开始规划：${preset.title}${extra}`,
+    })
+    setAppState('streaming')
+    setInputDisabled(true)
+    setProgressSteps(TRACE_PROGRESS.map((t) => ({ label: t.label, done: false })))
+    setCurrentTraceStep(null)
+    pushUiTrace('触发', `开始规划 · ${preset.title}${extra}`)
+    setPreferenceConflicts([])
+    setAcceptedAlternatives(new Set())
+    setSessionId(null)
+
+    try {
+      await consumePlanningStream(
+        streamAgent(preset.basePrompt, null, pendingOverrides),
+      )
+    } catch (err) {
+      setProgressSteps([])
+      setAppState('scenario_setup')
+      setInputDisabled(false)
+      addMessage({
+        role: 'ai',
+        type: 'text',
+        text: `抱歉，规划过程中出现了问题：${err instanceof Error ? err.message : '未知错误'}。请调整偏好后重试。`,
+      })
+    }
   }
 
   function handleSend(text: string) {
@@ -217,7 +334,10 @@ export default function App() {
     setPendingOverrides([])
     setPreferenceConflicts([])
     setAcceptedAlternatives(new Set())
+    setActiveScenario(null)
     setSessionId(null)
+    setCurrentTraceStep(null)
+    pushUiTrace('触发', `自由输入规划：${text.trim().slice(0, 48)}`)
 
     runInitialStream(text.trim())
   }
@@ -238,6 +358,7 @@ export default function App() {
   }
 
   function handleRemoveChip(override: ProfileOverride) {
+    pushUiTrace('偏好', `移除标签 ${override.key}=${override.value}`)
     setPendingOverrides((prev) => [...prev, override])
     setProfileChips((prev) =>
       prev.filter((c) => !(c.key === override.key && c.value === override.value)),
@@ -247,20 +368,20 @@ export default function App() {
         prev.filter((c) => !c.conflictingTags?.includes(override.value)),
       )
     }
-    setAppState('hil_editing')
+    if (appState === 'plans_displayed') setAppState('hil_editing')
   }
 
   function handleAddChip(override: ProfileOverride) {
+    pushUiTrace('偏好', `添加标签 ${override.key}=${override.value}`)
     setPendingOverrides((prev) => [...prev, override])
     setProfileChips((prev) => mergeProfileChips(prev, override))
     if (override.key === 'dietary' && override.value) {
       setPreferenceConflicts((prev) => {
         if (!prev.length) return prev
-        const left = prev.filter((c) => !c.conflictingTags?.includes(override.value))
-        return left
+        return prev.filter((c) => !c.conflictingTags?.includes(override.value))
       })
     }
-    setAppState('hil_editing')
+    if (appState === 'plans_displayed') setAppState('hil_editing')
   }
 
   async function runReplanStream(overrides: ProfileOverride[], userText: string) {
@@ -270,6 +391,8 @@ export default function App() {
     setInputDisabled(true)
     setIsReplanning(true)
     setProgressSteps(TRACE_PROGRESS.map((t) => ({ label: t.label, done: false })))
+    setCurrentTraceStep(null)
+    pushUiTrace('重规划', userText)
     setPendingOverrides(overrides)
 
     addMessage({ role: 'user', type: 'text', text: userText })
@@ -303,6 +426,7 @@ export default function App() {
     if (!plan) return
 
     setInputDisabled(true)
+    pushUiTrace('确认', `用户选定方案：${plan.venueChain}（${plan.title}）`)
     addMessage({
       role: 'user',
       type: 'text',
@@ -311,6 +435,13 @@ export default function App() {
 
     try {
       const result = await confirmAgent(sessionId, planId)
+      setCurrentTraceStep('executor')
+      if (result.trace_tail?.length) {
+        appendTrace(result.trace_tail)
+      } else if (result.trace?.length) {
+        appendTrace(result.trace)
+      }
+
       const orderLines = result.orders
         .map((o) => `✅ ${o.stage} 已下单 · 订单号 ${o.order_id}`)
         .join('\n')
@@ -336,6 +467,13 @@ export default function App() {
     const overrides = panelToOverrides(prefs)
 
     if (!sessionId) {
+      if (activeScenario) {
+        setProfileChips((prev) =>
+          overrides.reduce((chips, o) => mergeProfileChips(chips, o), prev),
+        )
+        setPendingOverrides((prev) => [...prev, ...overrides])
+        return
+      }
       handleSend(
         `帮我安排周末出行。距离${prefs.distance}，想吃${prefs.diet}，氛围${prefs.vibe}。`,
       )
@@ -349,6 +487,10 @@ export default function App() {
   }
 
   function handleAcceptAlternative(planId: string) {
+    const plan = plans.find((p) => p.id === planId)
+    if (plan) {
+      pushUiTrace('替代', `用户接受就近替代：${plan.venueChain}`)
+    }
     setAcceptedAlternatives((prev) => new Set([...prev, planId]))
     setAppState('plans_displayed')
   }
@@ -372,129 +514,156 @@ export default function App() {
     setAppState('hil_editing')
   }
 
-  const showChipEditor = appState === 'hil_editing' || appState === 'plans_displayed'
+  const showChipEditor =
+    (appState === 'hil_editing' || appState === 'plans_displayed') && !activeScenario
+  const activePreset = activeScenario ? SCENARIO_PRESETS[activeScenario] : null
 
   return (
-    <div className="app-container">
-      <div className="app-phone">
-        <div className="status-bar">
-          <span className="status-time">9:41</span>
-          <div className="status-icons">
-            <svg width="17" height="11" viewBox="0 0 17 11"><rect x="0" y="0" width="15" height="11" rx="2" fill="none" stroke="#222" strokeWidth="0.8"/><rect x="2" y="2" width="11" height="7" rx="1" fill="#222"/></svg>
+    <div className="demo-shell">
+      <div className="demo-phone-col">
+        <div className="app-phone">
+          <div className="status-bar">
+            <span className="status-time">9:41</span>
+            <div className="status-icons">
+              <svg width="17" height="11" viewBox="0 0 17 11"><rect x="0" y="0" width="15" height="11" rx="2" fill="none" stroke="#222" strokeWidth="0.8"/><rect x="2" y="2" width="11" height="7" rx="1" fill="#222"/></svg>
+            </div>
           </div>
-        </div>
 
-        <div className="chat-header">
-          <div className="header-avatar">W</div>
-          <div>
-            <div className="header-title">Weekend Agent</div>
-            <div className="header-subtitle">周末出游助手 · HIL 在线</div>
+          <div className="chat-header">
+            <div className="header-avatar">W</div>
+            <div>
+              <div className="header-title">Weekend Agent</div>
+              <div className="header-subtitle">周末出游助手 · HIL 在线</div>
+            </div>
           </div>
-        </div>
 
-        <div className="chat-messages">
-          {messages.map((msg) => {
-            if (msg.type === 'welcome') {
-              return (
-                <div key={msg.id} className="msg-row msg-ai">
-                  <WelcomeScreen
-                    greeting={msg.text ?? ''}
-                    prompts={SUGGESTED_PROMPTS}
-                    onPromptClick={handleSend}
-                    disabled={inputDisabled}
-                  />
-                </div>
-              )
-            }
-
-            if (msg.type === 'plans' && msg.plans) {
-              return (
-                <div key={msg.id} className="msg-row msg-ai msg-plan-row">
-                  <div className="ai-bubble ai-bubble-plan">
-                    <div className="bubble-text">{msg.text}</div>
-                    <PlanCards
-                      plans={msg.plans}
-                      acceptedAlternatives={acceptedAlternatives}
-                      onConfirm={handleConfirmPlan}
-                      onEditPreference={handleEditPreference}
-                      onAcceptAlternative={handleAcceptAlternative}
-                      onReject={handleRejectPlan}
-                      disabled={appState === 'confirmed' || inputDisabled}
+          <div className="chat-messages">
+            {messages.map((msg) => {
+              if (msg.type === 'welcome') {
+                return (
+                  <div key={msg.id} className="msg-row msg-ai">
+                    <WelcomeScreen
+                      greeting={msg.text ?? ''}
+                      onScenarioSelect={handleScenarioSelect}
+                      disabled={inputDisabled}
                     />
                   </div>
-                </div>
-              )
-            }
+                )
+              }
 
-            if (msg.role === 'user') {
-              return (
-                <div key={msg.id} className="msg-row msg-user">
-                  <div className="user-bubble">{msg.text}</div>
-                </div>
-              )
-            }
-
-            return (
-              <div key={msg.id} className="msg-row msg-ai">
-                <div className="ai-bubble">
-                  <div className="bubble-text">{msg.text}</div>
-                </div>
-              </div>
-            )
-          })}
-
-          {showChipEditor && preferenceConflicts.length > 0 && (
-            <div className="msg-row msg-ai">
-              <div className="preference-conflict-banner">
-                {preferenceConflicts.map((c, i) => (
-                  <div key={i}>
-                    <strong>{c.headline}</strong> {c.detail}
+              if (msg.type === 'plans' && msg.plans) {
+                return (
+                  <div key={msg.id} className="msg-row msg-ai msg-plan-row">
+                    <div className="ai-bubble ai-bubble-plan">
+                      <div className="bubble-text">{msg.text}</div>
+                      <PlanCards
+                        plans={msg.plans}
+                        acceptedAlternatives={acceptedAlternatives}
+                        onConfirm={handleConfirmPlan}
+                        onEditPreference={handleEditPreference}
+                        onAcceptAlternative={handleAcceptAlternative}
+                        onReject={handleRejectPlan}
+                        disabled={appState === 'confirmed' || inputDisabled}
+                      />
+                    </div>
                   </div>
-                ))}
+                )
+              }
+
+              if (msg.role === 'user') {
+                return (
+                  <div key={msg.id} className="msg-row msg-user">
+                    <div className="user-bubble">{msg.text}</div>
+                  </div>
+                )
+              }
+
+              return (
+                <div key={msg.id} className="msg-row msg-ai">
+                  <div className="ai-bubble">
+                    <div className="bubble-text">{msg.text}</div>
+                  </div>
+                </div>
+              )
+            })}
+
+            {appState === 'scenario_setup' && activePreset && (
+              <div className="msg-row msg-ai">
+                <ScenarioSetup
+                  preset={activePreset}
+                  chips={profileChips}
+                  onRemove={handleRemoveChip}
+                  onAdd={handleAddChip}
+                  onStart={handleStartScenarioPlanning}
+                  onCancel={handleCancelScenario}
+                  disabled={inputDisabled}
+                />
               </div>
-            </div>
-          )}
+            )}
 
-          {showChipEditor && profileChips.length > 0 && (
-            <div className="msg-row msg-ai">
-              <ProfileChips
-                chips={profileChips}
-                editing={appState === 'hil_editing' || appState === 'plans_displayed'}
-                onRemove={handleRemoveChip}
-                onAdd={handleAddChip}
-                onReplan={handleReplan}
-                replanning={isReplanning}
-              />
-            </div>
-          )}
+            {showChipEditor && preferenceConflicts.length > 0 && (
+              <div className="msg-row msg-ai">
+                <div className="preference-conflict-banner">
+                  {preferenceConflicts.map((c, i) => (
+                    <div key={i}>
+                      <strong>{c.headline}</strong> {c.detail}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
-          {appState === 'streaming' && progressSteps.length > 0 && (
-            <div className="msg-row msg-ai">
-              <ProgressIndicator steps={progressSteps} live />
-            </div>
-          )}
+            {showChipEditor && profileChips.length > 0 && (
+              <div className="msg-row msg-ai">
+                <ProfileChips
+                  chips={profileChips}
+                  editing={appState === 'hil_editing' || appState === 'plans_displayed'}
+                  onRemove={handleRemoveChip}
+                  onAdd={handleAddChip}
+                  onReplan={handleReplan}
+                  replanning={isReplanning}
+                />
+              </div>
+            )}
 
-          <div ref={messagesEndRef} />
+            {appState === 'streaming' && progressSteps.length > 0 && (
+              <div className="msg-row msg-ai">
+                <ProgressIndicator steps={progressSteps} live />
+              </div>
+            )}
+
+            <div ref={messagesEndRef} />
+          </div>
+
+          <InputBar
+            onSend={handleSend}
+            disabled={inputDisabled}
+            placeholder={
+              appState === 'confirmed'
+                ? '已确认，祝您周末愉快！'
+                : appState === 'scenario_setup'
+                  ? '或在上方补充偏好后点「按此偏好开始规划」'
+                  : appState === 'hil_editing'
+                    ? '或在上方修改偏好后点「重新规划」'
+                    : '也可直接输入自由需求…'
+            }
+          />
+
+          <PreferencePanel
+            open={isPreferencePanelOpen}
+            preferences={panelPreferences}
+            onChange={setPanelPreferences}
+            onClose={() => setIsPreferencePanelOpen(false)}
+            onSubmit={handlePreferenceSubmit}
+          />
         </div>
+      </div>
 
-        <InputBar
-          onSend={handleSend}
-          disabled={inputDisabled}
-          placeholder={
-            appState === 'confirmed'
-              ? '已确认，祝您周末愉快！'
-              : appState === 'hil_editing'
-                ? '或在上方修改偏好后点「重新规划」'
-                : '家庭或朋友出游，说说人数、时间、饮食偏好…'
-          }
-        />
-
-        <PreferencePanel
-          open={isPreferencePanelOpen}
-          preferences={panelPreferences}
-          onChange={setPanelPreferences}
-          onClose={() => setIsPreferencePanelOpen(false)}
-          onSubmit={handlePreferenceSubmit}
+      <div className="demo-trace-col">
+        <TracePanel
+          lines={traceLines}
+          live={appState === 'streaming'}
+          currentStep={currentTraceStep}
         />
       </div>
     </div>

@@ -87,6 +87,13 @@ def executor_node(state: AgentState) -> dict:
         msg += f"，跳过预检未通过 {skipped} 项"
     elif not failed:
         msg += " ✓"
+    addon_deliveries = [
+        str(call.result.get("deliver_to_poi_id") or call.result.get("delivery_address"))
+        for call in executed
+        if call.tool_name == "order_addon" and call.result
+    ]
+    if addon_deliveries:
+        msg += f"；order_addon deliver_to_poi_id={addon_deliveries[0]}"
 
     return {
         "executed_calls": executed,

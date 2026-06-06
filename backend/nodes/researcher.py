@@ -5,6 +5,7 @@ from __future__ import annotations
 from backend.agents import run_initial_research
 from backend.roles import trace_line
 from backend.state import AgentState
+from backend.trace_compare import format_research_boards
 
 
 def researcher_node(state: AgentState) -> dict:
@@ -21,7 +22,8 @@ def researcher_node(state: AgentState) -> dict:
     if selected:
         msg += f"｜{selected}"
 
+    trace = [trace_line("Researcher", msg), *format_research_boards(research)]
     return {
         "research_result": research,
-        "trace": [trace_line("Researcher", msg)],
+        "trace": trace,
     }

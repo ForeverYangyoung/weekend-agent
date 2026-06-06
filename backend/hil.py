@@ -338,6 +338,7 @@ def _build_plan_issues(
     for raw in raw_issues:
         if raw.startswith("菜系约束未满足：") and play and eat:
             missing = raw.split("不匹配 ", 1)[-1].strip()
+            eat_short = _short_poi_name(eat_name)
             nearby = _eat_candidates_matching_near_play(
                 research, play.primary, profile, {missing}
             )
@@ -345,15 +346,17 @@ def _build_plan_issues(
                 structured.append(
                     {
                         "code": "cuisine_unavailable",
-                        "headline": "附近暂无符合菜系的餐厅",
+                        "headline": f"附近找不到「{missing}」餐厅",
                         "detail": (
-                            f"在「{play_label}」周边 {_MAX_PLAY_EAT_DIST_KM:g}km 内"
-                            f"找不到「{missing}」餐厅；已就近推荐「{_short_poi_name(eat_name)}」作为顺路替代。"
+                            f"您指定了「{missing}」。在「{play_label}」周边 "
+                            f"{_MAX_PLAY_EAT_DIST_KM:g}km、且总距离 ≤{profile.distance_limit_km:.0f}km "
+                            f"的范围内，Mock 数据里没有符合条件的「{missing}」店。"
+                            f"系统暂时用「{eat_short}」凑了一条顺路方案。"
                         ),
                         "suggestions": [
-                            f"接受「{_short_poi_name(eat_name)}」替代方案",
-                            f"修改偏好，去掉「{missing}」",
-                            "换一个活动区域后再找该菜系",
+                            f"若可接受轻食/其他口味：点「接受 {eat_short} 替代」",
+                            f"若坚持「{missing}」：去掉距离限制或换「海淀区」等活动区域后重规划",
+                            f"或修改偏好，去掉「{missing}」",
                         ],
                         "allowAcceptAlternative": True,
                         "missingCuisine": missing,
@@ -363,6 +366,29 @@ def _build_plan_issues(
                 issue_kind = "alternative_available"
                 allow_accept = True
                 continue
+
+            nearby_names = "、".join(_short_poi_name(c.name) for c in nearby[:3])
+            structured.append(
+                {
+                    "code": "cuisine_not_matched_but_nearby",
+                    "headline": f"您要「{missing}」，但当前推荐的不是这类店",
+                    "detail": (
+                        f"方案里吃饭选的是「{eat_short}」，不符合「{missing}」。"
+                        f"其实在「{play_label}」周边 {_MAX_PLAY_EAT_DIST_KM:g}km 内"
+                        f"能找到：{nearby_names}。请点击「重新规划」换店。"
+                    ),
+                    "suggestions": [
+                        "点「按新偏好重新规划」自动换川菜店",
+                        f"或去掉「{missing}」接受当前「{eat_short}」",
+                    ],
+                    "allowAcceptAlternative": False,
+                    "missingCuisine": missing,
+                    "playArea": play_label,
+                    "nearbyOptions": nearby_names,
+                }
+            )
+            issue_kind = "needs_preference_fix"
+            continue
 
         if "顺路约束" in raw or "距离约束" in raw:
             structured.append(

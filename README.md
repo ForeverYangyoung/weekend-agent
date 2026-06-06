@@ -34,34 +34,49 @@ cd frontend-v2 && npm run dev
 # 打开 http://localhost:3000
 ```
 
-**CLI 终端演示**（答辩逐行 trace）：
+## 答辩演示（推荐 UI）
+
+左手机 + 右 Trace，双轨场景：
+
+| 场景 | 操作 | 右侧 Trace 看点 |
+|------|------|----------------|
+| **家庭** | 选家庭场景 → 开始规划 → 确认下单 | 候选榜 / 方案对比 / 加餐 `deliver_to_poi_id` |
+| **朋友** | 选朋友场景（4 人）→ 开始规划 | 姜虎东 DryRun 满座 → Recovery 换炙烤大叔 |
+
+**CLI 备用**（无浏览器时）：
 
 ```powershell
 python -m backend.demo --scene family
-python -m backend.demo --scene family --fail 吃   # 补偿链演示
+python -m backend.demo --scene friends
+python -m backend.demo --scene family --fail 吃   # 确认后补偿链
 ```
+
+## 文档（真源）
+
+| 文件 | 用途 |
+|------|------|
+| `01-题目工程拆解.md` | 赛题 PRD、Mock API、场景定义 |
+| `02.架构和agent.md` | LangGraph 拓扑、Agent 职责、State |
+| `03.细节实现.md` | 已落地功能对照表 |
+| `docs/mock-api.md` | Mock HTTP 端点与 curl |
 
 ## 项目结构
 
 | 路径 | 说明 |
 |------|------|
-| `backend/` | LangGraph 状态机、FastAPI、Mock 美团 API |
-| `frontend-v2/` | React 答辩 UI（SSE 对接） |
-| `planner/` | 规划引擎子模块（顺路活动、时间轴） |
-| `01-题目工程拆解.md` | 赛题 PRD / Mock API 契约 |
-| `02.架构和agent.md` | 架构与 Agent 设计 |
-| `03.细节实现.md` | 已落地亮点 |
-| `04.第一阶段展示.md` | CLI 跑通记录与答辩话术 |
+| `backend/` | LangGraph、FastAPI、SSE、Mock 美团 |
+| `frontend-v2/` | React 答辩 UI |
+| `planner/` | 顺路活动目录等规划辅助模块 |
+| `tests/` | API 与场景回归 |
 
 ## API
 
 | 端点 | 说明 |
 |------|------|
 | `GET /` | React 前端 |
-| `GET /health` | 健康检查 |
-| `POST /v1/agent/stream` | 规划 + 预检（HIL 暂停，待确认） |
-| `POST /v1/agent/replan` | 点改偏好后从 Researcher 重跑 |
-| `POST /v1/agent/confirm` | 用户确认后真实下单 |
-| `GET /mock-meituan/*` | Mock 美团 HTTP API |
+| `POST /v1/agent/stream` | 规划 + 预检（HIL 暂停） |
+| `POST /v1/agent/replan` | 改偏好后重规划 |
+| `POST /v1/agent/confirm` | 确认后下单 |
+| `GET /mock-meituan/*` | Mock 美团 HTTP |
 
-详细 Mock 接口见 [docs/mock-api.md](docs/mock-api.md)。
+Mock 接口详情见 [docs/mock-api.md](docs/mock-api.md)。
