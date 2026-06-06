@@ -48,6 +48,7 @@ def clear_planning_artifacts() -> dict[str, Any]:
         "failed_calls": [],
         "summary_card": None,
         "user_confirmed": False,
+        "selected_addon_ids": [],
         "force_failure": None,
     }
 
@@ -207,10 +208,11 @@ def detect_preference_conflicts(profile: GroupProfile | None) -> list[dict[str, 
         conflicts.append(
             {
                 "code": "light_vs_heavy_cuisine",
-                "headline": "饮食偏好互相矛盾",
+                "headline": "Zero-Skill Mock：隐式健康档案与显式偏好冲突",
                 "detail": (
-                    f"您同时要求「轻食/低卡」和「{heavy_text}」，"
-                    "很难在同一家餐厅同时满足，请先调整偏好。"
+                    "跨端档案显示家庭成员处于控糖控卡周期，已自动叠加「轻食/低卡」；"
+                    f"但您又指定了「{heavy_text}」。"
+                    "请先调整偏好后再规划（保留健康档案，或显式移除低卡约束）。"
                 ),
                 "suggestions": [
                     f"去掉「{heavy_text}」，保留轻食/减肥",
@@ -224,10 +226,38 @@ def detect_preference_conflicts(profile: GroupProfile | None) -> list[dict[str, 
         conflicts.append(
             {
                 "code": "light_vs_heavy_taste",
-                "headline": "饮食偏好互相矛盾",
-                "detail": "您同时要求「轻食/低卡」和「重口味」，请先选择其一。",
+                "headline": "Zero-Skill Mock：隐式健康档案与显式偏好冲突",
+                "detail": (
+                    "跨端档案显示家庭成员处于控糖控卡周期，已自动叠加「轻食/低卡」；"
+                    "但您又指定了「重口味」。请先调整偏好后再规划。"
+                ),
                 "suggestions": ["保留轻食/减肥", "改为重口味（烤肉/火锅）"],
                 "conflictingTags": ["轻食", "低卡", "重口味"],
+            }
+        )
+
+    no_spicy = "禁辣" in profile.dietary or "不辣" in profile.dietary
+    spicy_request = "重口味" in profile.dietary or bool(heavy_cuisines)
+    spicy_labels: list[str] = []
+    if "重口味" in profile.dietary:
+        spicy_labels.append("重口味")
+    spicy_labels.extend(heavy_cuisines)
+    spicy_labels = sorted(set(spicy_labels))
+    if no_spicy and spicy_request:
+        conflicts.append(
+            {
+                "code": "no_spicy_vs_heavy",
+                "headline": "Zero-Skill Mock：隐式健康档案与显式偏好冲突",
+                "detail": (
+                    "跨端档案显示成员处于「痔疮/上火恢复期」，已自动禁辣；"
+                    f"但您又指定了「{'、'.join(spicy_labels)}」。"
+                    "请先调整偏好后再规划（正式版由 LTM 驱动，本 Demo 为 Mock 演示）。"
+                ),
+                "suggestions": [
+                    "去掉重口味/川菜/火锅，保留禁辣",
+                    "去掉禁辣，保留当前重口味选择",
+                ],
+                "conflictingTags": ["禁辣", *spicy_labels],
             }
         )
 
@@ -506,6 +536,18 @@ def plan_to_display(
             "tags": list(tags),
             **extras,
         }
+
+    if plan.addons:
+        payload["addons"] = [
+            {
+                "addon_id": a.addon_id,
+                "type": a.type,
+                "description": a.description,
+                "price": a.price,
+                "target_poi_id": a.target_poi_id,
+            }
+            for a in plan.addons
+        ]
 
     return payload
 

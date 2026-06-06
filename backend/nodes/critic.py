@@ -22,11 +22,26 @@ def critic_node(state: AgentState) -> dict:
     issues: list[CriticIssue] = []
     plan_updates: dict = {}
 
+    targeted = state.get("targeted_research_result")
+
     if profile and plan:
-        merged = merge_targeted_addon(plan, profile, state.get("targeted_research_result"))
+        merged = merge_targeted_addon(plan, profile, targeted)
         if merged is not plan:
             plan = merged
             plan_updates["plan"] = merged
+
+        alts = list(state.get("plan_alternatives") or [])
+        if alts:
+            new_alts: list = []
+            alt_changed = False
+            for alt in alts:
+                merged_alt = merge_targeted_addon(alt, profile, targeted)
+                if merged_alt is not alt:
+                    alt_changed = True
+                new_alts.append(merged_alt)
+            if alt_changed:
+                plan_updates["plan_alternatives"] = new_alts
+
         eats = [s for s in plan.stages if s.name == "吃"]
         plays = [s for s in plan.stages if s.name == "玩"]
 
@@ -99,18 +114,28 @@ def critic_node(state: AgentState) -> dict:
             phase="校验",
         )
     ]
-    if plan and any(s.name == "加餐" for s in plan.stages):
-        addon = next(s for s in plan.stages if s.name == "加餐")
-        eat = next((s for s in plan.stages if s.name == "吃"), None)
-        deliver = (addon.primary.metadata or {}).get("deliver_to_poi_id", "—")
+    plans_with_addons = [plan] if plan and plan.addons else []
+    for alt in plan_updates.get("plan_alternatives") or state.get("plan_alternatives") or []:
+        if alt.addons:
+            plans_with_addons.append(alt)
+    if plans_with_addons:
         trace_msgs.append(
             trace_line(
                 "Critic",
-                f"并入加餐 {addon.primary.name} → deliver_to_poi_id={deliver}"
-                + (f"（餐厅={eat.primary.name}）" if eat else ""),
+                f"HIL附加项已为 {len(plans_with_addons)} 套方案生成（按各店 POI 绑定送达点）",
                 phase="校验",
             )
         )
+        for idx, p in enumerate(plans_with_addons):
+            for addon in p.addons:
+                trace_msgs.append(
+                    trace_line(
+                        "Critic",
+                        f"  方案#{idx + 1} [{addon.type}] {addon.description} "
+                        f"→ target_poi_id={addon.target_poi_id}",
+                        phase="校验",
+                    )
+                )
 
     return {
         **plan_updates,

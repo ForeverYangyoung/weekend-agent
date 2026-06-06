@@ -33,7 +33,7 @@ const INITIAL_MESSAGES: ChatMessage[] = [
     role: 'ai',
     type: 'welcome',
     text:
-      '嗨，我是你的周末小助手。\n\n答辩演示：左侧对话规划，右侧实时 Trace。\n先选「家庭」或「朋友」场景，再补充偏好（例如家庭也可加火锅），满意后确认下单。',
+      '嗨，我是你的周末小助手。\n\n答辩演示：左侧对话规划，右侧实时 Trace。\n先选场景再规划；朋友局可看「未说禁辣却唤醒健康档案」的 Zero-Skill Mock（详见 Trace 历史档案行）。满意后确认下单。',
     timestamp: Date.now(),
   },
 ]
@@ -145,7 +145,35 @@ export default function App() {
   const [panelPreferences, setPanelPreferences] = useState(DEFAULT_PANEL_PREFS)
   const [preferenceConflicts, setPreferenceConflicts] = useState<PreferenceConflict[]>([])
   const [acceptedAlternatives, setAcceptedAlternatives] = useState<Set<string>>(new Set())
+  const [selectedAddonsByPlan, setSelectedAddonsByPlan] = useState<Map<string, Set<string>>>(
+    new Map(),
+  )
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  function initSelectedAddons(mappedPlans: DisplayPlan[]) {
+    setSelectedAddonsByPlan((prev) => {
+      const next = new Map(prev)
+      for (const p of mappedPlans) {
+        if (!p.addons?.length) continue
+        next.set(p.id, new Set(p.addons.map((a) => a.addon_id)))
+      }
+      return next
+    })
+  }
+
+  function handleToggleAddon(planId: string, addonId: string, checked: boolean) {
+    setSelectedAddonsByPlan((prev) => {
+      const next = new Map(prev)
+      const current = new Set(next.get(planId) ?? [])
+      if (checked) {
+        current.add(addonId)
+      } else {
+        current.delete(addonId)
+      }
+      next.set(planId, current)
+      return next
+    })
+  }
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -232,7 +260,9 @@ export default function App() {
     setAcceptedAlternatives(new Set())
     setPendingOverrides([])
     setActiveScenario(null)
-    setPlans(mapPlansFromBackend(awaiting.plans))
+    const mappedPlans = mapPlansFromBackend(awaiting.plans)
+    setPlans(mappedPlans)
+    initSelectedAddons(mappedPlans)
     setProgressSteps(progressFromTrace(lastTrace).map((s) => ({ ...s, done: true })))
 
     const chipText = (awaiting.profile_chips ?? []).map((c) => c.label).join('、')
@@ -240,7 +270,7 @@ export default function App() {
     const primaryIssue = primary?.planIssues?.[0]
     const conflictHint =
       (awaiting.preference_conflicts ?? []).length > 0
-        ? '检测到饮食偏好互相矛盾，请先点「修改矛盾偏好」或上方标签调整后再规划。'
+        ? '检测到「历史档案约束」和「当前显式偏好」冲突，请在上方标签里删除一边后再规划。'
         : ''
     const cuisineHint =
       primaryIssue?.code === 'cuisine_unavailable'
@@ -420,13 +450,19 @@ export default function App() {
     await runReplanStream(pendingOverrides, text)
   }
 
-  async function handleConfirmPlan(planId: string) {
+  async function handleConfirmPlan(planId: string, selectedAddonIds: string[] = []) {
     if (!sessionId) return
     const plan = plans.find((p) => p.id === planId)
     if (!plan) return
 
     setInputDisabled(true)
-    pushUiTrace('确认', `用户选定方案：${plan.venueChain}（${plan.title}）`)
+    const addonHint =
+      selectedAddonIds.length > 0
+        ? `，附加项 ${selectedAddonIds.length} 项`
+        : plan.addons?.length
+          ? '，未选附加项'
+          : ''
+    pushUiTrace('确认', `用户选定方案：${plan.venueChain}（${plan.title}）${addonHint}`)
     addMessage({
       role: 'user',
       type: 'text',
@@ -434,7 +470,7 @@ export default function App() {
     })
 
     try {
-      const result = await confirmAgent(sessionId, planId)
+      const result = await confirmAgent(sessionId, planId, selectedAddonIds)
       setCurrentTraceStep('executor')
       if (result.trace_tail?.length) {
         appendTrace(result.trace_tail)
@@ -559,7 +595,9 @@ export default function App() {
                       <PlanCards
                         plans={msg.plans}
                         acceptedAlternatives={acceptedAlternatives}
+                        selectedAddonsByPlan={selectedAddonsByPlan}
                         onConfirm={handleConfirmPlan}
+                        onToggleAddon={handleToggleAddon}
                         onEditPreference={handleEditPreference}
                         onAcceptAlternative={handleAcceptAlternative}
                         onReject={handleRejectPlan}
@@ -604,6 +642,7 @@ export default function App() {
             {showChipEditor && preferenceConflicts.length > 0 && (
               <div className="msg-row msg-ai">
                 <div className="preference-conflict-banner">
+                  <div className="preference-conflict-kicker">未来方向预览 · Zero-Skill 隐式画像 Mock</div>
                   {preferenceConflicts.map((c, i) => (
                     <div key={i}>
                       <strong>{c.headline}</strong> {c.detail}

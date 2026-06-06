@@ -77,11 +77,16 @@ export interface ConfirmResult {
 export async function confirmAgent(
   sessionId: string,
   planId: string,
+  selectedAddonIds: string[] = [],
 ): Promise<ConfirmResult> {
   const res = await fetch('/v1/agent/confirm', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session_id: sessionId, plan_id: planId }),
+    body: JSON.stringify({
+      session_id: sessionId,
+      plan_id: planId,
+      selected_addon_ids: selectedAddonIds,
+    }),
   })
   if (!res.ok) {
     const text = await res.text()

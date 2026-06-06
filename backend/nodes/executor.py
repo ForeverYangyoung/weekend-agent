@@ -53,9 +53,79 @@ def _run_write_call(
     return call
 
 
+def _execute_selected_addons(
+    plan,
+    selected_ids: list[str],
+    *,
+    ctx: ToolContext,
+    run_id: str,
+    executed: list[ToolCall],
+    failed: list[ToolCall],
+) -> list[str]:
+    """用户勾选的 HIL 附加项：确认后才下单。"""
+    trace_lines: list[str] = []
+    if not plan or not selected_ids:
+        return trace_lines
+
+    for addon in plan.addons or []:
+        if addon.addon_id not in selected_ids:
+            continue
+        idem = f"run_{run_id}_addon_{addon.addon_id}"
+        call = ToolCall(
+            id=f"tc_{uuid4().hex[:8]}",
+            stage_name="附加",
+            tool_name="order_addon",
+            args={
+                "poi_id": addon.poi_id,
+                "deliver_to_poi_id": addon.target_poi_id,
+                "delivery_address": addon.target_poi_id,
+                "idempotency_key": idem,
+            },
+            started_at=datetime.utcnow(),
+        )
+        try:
+            call.result = invoke(
+                "order_addon",
+                call.args,
+                ctx=ToolContext(
+                    force_failure_stage=ctx.force_failure_stage,
+                    idempotency_key=idem,
+                ),
+                stage_name="附加",
+            )
+            call.status = ToolStatus.OK
+            executed.append(call)
+            deliver = call.result.get("deliver_to_poi_id") or addon.target_poi_id
+            trace_lines.append(
+                trace_line(
+                    "Executor",
+                    f"附加下单成功 {addon.description} → deliver_to_poi_id={deliver}",
+                    phase="提交",
+                )
+            )
+        except ToolError as e:
+            call.status = ToolStatus.FAILED
+            call.error = e.message
+            call.result = {"code": e.code, **e.details}
+            failed.append(call)
+            trace_lines.append(
+                trace_line(
+                    "Executor",
+                    f"附加下单失败 {addon.addon_id}: {e.message}",
+                    phase="提交",
+                )
+            )
+        call.finished_at = datetime.utcnow()
+
+    return trace_lines
+
+
 def executor_node(state: AgentState) -> dict:
     dry_calls = state.get("dry_run_calls", [])
-    if not dry_calls:
+    plan = state.get("plan")
+    selected_addon_ids = list(state.get("selected_addon_ids") or [])
+
+    if not dry_calls and not (plan and plan.addons and selected_addon_ids):
         return {
             "executed_calls": [],
             "failed_calls": [],
@@ -80,6 +150,15 @@ def executor_node(state: AgentState) -> dict:
         else:
             failed.append(call)
 
+    addon_trace = _execute_selected_addons(
+        plan,
+        selected_addon_ids,
+        ctx=ctx,
+        run_id=run_id,
+        executed=executed,
+        failed=failed,
+    )
+
     msg = f"成功 {len(executed)} 笔"
     if failed:
         msg += f"，失败 {len(failed)} 笔 ✗"
@@ -87,16 +166,10 @@ def executor_node(state: AgentState) -> dict:
         msg += f"，跳过预检未通过 {skipped} 项"
     elif not failed:
         msg += " ✓"
-    addon_deliveries = [
-        str(call.result.get("deliver_to_poi_id") or call.result.get("delivery_address"))
-        for call in executed
-        if call.tool_name == "order_addon" and call.result
-    ]
-    if addon_deliveries:
-        msg += f"；order_addon deliver_to_poi_id={addon_deliveries[0]}"
 
+    trace_out = [trace_line("Executor", msg, phase="提交"), *addon_trace]
     return {
         "executed_calls": executed,
         "failed_calls": failed,
-        "trace": [trace_line("Executor", msg, phase="提交")],
+        "trace": trace_out,
     }

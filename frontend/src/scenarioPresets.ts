@@ -33,7 +33,7 @@ export const SCENARIO_PRESETS: Record<ScenarioId, ScenarioPreset> = {
   friends: {
     id: 'friends',
     title: '朋友场景',
-    subtitle: '4 人 · 重口味 · 可触发满座重规划',
+    subtitle: '4 人 · 重口味 · Zero-Skill 档案 Mock + 满座 Recovery',
     basePrompt: '下午和三个朋友一起出去，4个人，别太远，想吃重口味，帮我安排一下',
     defaultChips: [
       { key: 'scene', label: '朋友', value: 'friends', source: 'utterance', editable: true },

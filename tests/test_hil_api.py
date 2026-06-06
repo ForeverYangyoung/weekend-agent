@@ -138,16 +138,52 @@ def test_stream_with_initial_overrides_adds_hotpot_to_family() -> None:
 
 def test_hil_confirm_returns_orders() -> None:
     c = TestClient(app)
-    session_id, _ = _stream_until_confirm(
+    session_id, payload = _stream_until_confirm(
         c, "今天下午带老婆孩子出去玩，别太远，老婆减肥，孩子5岁"
     )
 
+    addons = (payload.get("plans") or [{}])[0].get("addons") or []
+    selected = [a["addon_id"] for a in addons] if addons else []
+
     r = c.post(
         "/v1/agent/confirm",
-        json={"session_id": session_id, "plan_id": "primary"},
+        json={
+            "session_id": session_id,
+            "plan_id": "primary",
+            "selected_addon_ids": selected,
+        },
     )
     assert r.status_code == 200
     data = r.json()
     assert data["status"] == "ok"
     assert data["executed"] >= 1
     assert data.get("orders")
+
+
+def test_all_plan_cards_get_scene_addons() -> None:
+    """主方案与备选方案都应带上同类型附加项，送达点绑定各自餐厅/活动 POI。"""
+    c = TestClient(app)
+    _, payload = _stream_until_confirm(
+        c, "下午和三个朋友一起出去，4个人，别太远，想吃重口味"
+    )
+    plans = payload.get("plans") or []
+    assert len(plans) >= 2
+    for p in plans:
+        assert p.get("addons"), f"{p.get('id')} 缺少附加项"
+        eat_name = (p.get("eat") or {}).get("name", "")
+        desc = p["addons"][0].get("description", "")
+        if eat_name:
+            short = eat_name.split("（")[0].strip()
+            assert short in desc, f"附加项未绑定到该方案的餐厅：{eat_name}"
+
+
+def test_plan_payload_includes_hil_addons() -> None:
+    c = TestClient(app)
+    _, payload = _stream_until_confirm(
+        c, "今天下午带老婆孩子出去玩，老婆减肥，孩子5岁，帮我安排一下。"
+    )
+    primary = payload["plans"][0]
+    assert primary.get("addons")
+    assert primary["addons"][0].get("addon_id")
+    assert primary["addons"][0].get("description")
+    assert "加餐" not in (primary.get("order_label") or "")

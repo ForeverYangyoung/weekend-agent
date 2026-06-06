@@ -4,7 +4,9 @@ import { PlanCard } from './PlanCard'
 interface Props {
   plans: DisplayPlan[]
   acceptedAlternatives?: Set<string>
-  onConfirm: (planId: string) => void
+  selectedAddonsByPlan?: Map<string, Set<string>>
+  onConfirm: (planId: string, selectedAddonIds: string[]) => void
+  onToggleAddon?: (planId: string, addonId: string, checked: boolean) => void
   onEditPreference: () => void
   onAcceptAlternative?: (planId: string) => void
   onReject: () => void
@@ -14,7 +16,9 @@ interface Props {
 export function PlanCards({
   plans,
   acceptedAlternatives,
+  selectedAddonsByPlan,
   onConfirm,
+  onToggleAddon,
   onEditPreference,
   onAcceptAlternative,
   onReject,
@@ -29,7 +33,9 @@ export function PlanCards({
             plan={plan}
             isTop1={index === 0}
             alternativeAccepted={acceptedAlternatives?.has(plan.id)}
+            selectedAddonIds={selectedAddonsByPlan?.get(plan.id)}
             onConfirm={onConfirm}
+            onToggleAddon={onToggleAddon}
             onEditPreference={onEditPreference}
             onAcceptAlternative={onAcceptAlternative}
             disabled={disabled}

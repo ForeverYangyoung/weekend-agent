@@ -76,8 +76,17 @@ export function ProfileChips({
       </div>
       <div className="profile-chips">
         {chips.map((chip) => (
-          <span key={`${chip.key}-${chip.value}-${chip.label}`} className="profile-chip">
+          <span
+            key={`${chip.key}-${chip.value}-${chip.label}`}
+            className={`profile-chip${chip.source === 'history' ? ' profile-chip-history' : ''}`}
+            title={
+              chip.source === 'history'
+                ? 'Zero-Skill Mock · 跨端健康档案自动注入（如痔疮恢复期禁辣）'
+                : undefined
+            }
+          >
             <span>{chip.label}</span>
+            {chip.source === 'history' && <span className="profile-chip-source">档案</span>}
             {editing && (
               <button
                 type="button"

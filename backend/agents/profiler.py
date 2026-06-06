@@ -632,14 +632,6 @@ def apply_profile_overrides(
                 updated.dietary.append(value)
             elif action == "set":
                 updated.dietary = [value] if value else []
-            if value in ("轻食", "低卡"):
-                updated.dietary = [
-                    d for d in updated.dietary if d not in ("重口味", "烤肉", "火锅")
-                ]
-            elif value in ("重口味", "烤肉", "火锅"):
-                updated.dietary = [
-                    d for d in updated.dietary if d not in ("轻食", "低卡")
-                ]
         elif key == "interests":
             if action == "remove":
                 updated.interests = [i for i in updated.interests if i != value]

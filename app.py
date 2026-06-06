@@ -8,25 +8,34 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import uvicorn
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-FRONTEND_DIR = PROJECT_ROOT / "frontend-v2"
-FRONTEND_DIST = FRONTEND_DIR / "dist"
+
+
+def _resolve_frontend_dir() -> Path | None:
+    for name in ("frontend", "frontend-v2"):
+        path = PROJECT_ROOT / name
+        if path.is_dir() and (path / "package.json").is_file():
+            return path
+    return None
 
 
 def build_frontend() -> bool:
     """构建前端产物；失败时返回 False 但不阻止后端启动。"""
-    if not FRONTEND_DIR.is_dir():
-        print("  [warn] frontend-v2/ 目录不存在，跳过前端构建")
+    frontend_dir = _resolve_frontend_dir()
+    if frontend_dir is None:
+        print("  [warn] 未找到 frontend/ 或 frontend-v2/，跳过前端构建")
         return False
 
-    if FRONTEND_DIST.is_dir() and (FRONTEND_DIST / "index.html").is_file():
-        print("  [ok] 前端产物已存在，跳过构建")
+    frontend_dist = frontend_dir / "dist"
+
+    if frontend_dist.is_dir() and (frontend_dist / "index.html").is_file():
+        print(f"  [ok] 前端产物已存在 ({frontend_dir.name}/dist)，跳过构建")
         return True
 
-    print("  [build] 正在构建前端...")
+    print(f"  [build] 正在构建 {frontend_dir.name}/ ...")
     try:
         subprocess.run(
             ["npm", "run", "build"],
-            cwd=str(FRONTEND_DIR),
+            cwd=str(frontend_dir),
             check=True,
             capture_output=True,
             text=True,
@@ -37,7 +46,7 @@ def build_frontend() -> bool:
         print(f"  [warn] 前端构建失败:\n{e.stderr}")
         return False
     except FileNotFoundError:
-        print("  [warn] 未找到 npm，跳过前端构建。请手动执行: cd frontend-v2 && npm run build")
+        print("  [warn] 未找到 npm，跳过前端构建。请手动执行: cd frontend && npm run build")
         return False
 
 

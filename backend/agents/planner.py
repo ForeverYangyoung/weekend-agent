@@ -282,26 +282,7 @@ def _build_plan_with_order(
             )
             cursor = _shift(seg_end, _DURATION_TRANSIT)
 
-    # 加餐附在「吃」开始的 +90min（与 nodes/planner 旧逻辑一致）
-    addon_stage = research_by_name.get("加餐")
-    if addon_stage is not None and "吃" in stage_objs:
-        addon_pool = _filter_stage_candidates(addon_stage, profile, blocked)
-        if addon_pool:
-            addon = addon_pool[0]
-            eat_poi_id = stage_objs["吃"].primary.poi_id
-            eat_name = stage_objs["吃"].primary.name
-            addon_meta = dict(addon.metadata or {})
-            addon_meta["target_restaurant"] = eat_poi_id
-            addon_meta["deliver_to_poi_id"] = eat_poi_id
-            addon_with_target = addon.model_copy(update={"metadata": addon_meta})
-            addon_start = _shift(stage_objs["吃"].start_time, _ADDON_AFTER_EAT_START)
-            stage_objs["加餐"] = PlanStage(
-                name="加餐",
-                start_time=addon_start,
-                end_time=_shift(addon_start, _ADDON_DURATION),
-                primary=addon_with_target,
-                notes=f"送至餐厅「{eat_name}」（{eat_poi_id}）",
-            )
+    # 加餐改为 HIL 可选附加项，由 critic.attach_hil_addons 生成，不在此静默插入阶段
 
     # 按时间排序成 stages 列表
     final_stages = sorted(stage_objs.values(), key=lambda s: s.start_time)
@@ -317,78 +298,89 @@ def _build_plan_with_order(
     return plan
 
 
+def attach_hil_addons(
+    plan: Plan,
+    profile: GroupProfile,
+    targeted: ResearchResult | None,
+) -> Plan:
+    """精准搜完成后，生成 HIL 可选附加项（不静默并入加餐阶段）。"""
+    from backend.schemas import PlanAddon
+
+    eat_stage = next((s for s in plan.stages if s.name == "吃"), None)
+    play_stage = next((s for s in plan.stages if s.name == "玩"), None)
+
+    stages = [s for s in plan.stages if s.name != "加餐"]
+    order_label = " → ".join(s.name for s in stages)
+
+    addon_candidate = None
+    if targeted:
+        addon_result = next(
+            (s for s in targeted.stages if s.stage_name.startswith("加餐")),
+            None,
+        )
+        if addon_result and addon_result.selected:
+            addon_candidate = addon_result.selected
+
+    addons: list[PlanAddon] = []
+
+    if profile.scene == "family" and play_stage:
+        poi_id = addon_candidate.poi_id if addon_candidate else "poi_cake_007"
+        meta = addon_candidate.metadata if addon_candidate else {}
+        price = int(meta.get("avg_price", 35) or 35) * 2
+        addons.append(
+            PlanAddon(
+                addon_id="addon_family_refresh",
+                type="refresh",
+                description=(
+                    "顺畅离园：低糖果茶×2 + 鲜牛奶×1，"
+                    f"玩完送至「{play_stage.primary.name}」出口"
+                ),
+                poi_id=poi_id,
+                target_poi_id=play_stage.primary.poi_id,
+                price=price,
+            )
+        )
+
+    if profile.scene == "friends" and eat_stage:
+        poi_id = addon_candidate.poi_id if addon_candidate else "poi_flower_009"
+        meta = addon_candidate.metadata if addon_candidate else {}
+        price = int(meta.get("avg_price", 80) or 80)
+        eat_short = eat_stage.primary.name.split("（")[0].strip()
+        addons.append(
+            PlanAddon(
+                addon_id="addon_friends_surprise",
+                type="surprise",
+                description=f"餐前惊喜：鲜花提前送至「{eat_short}」",
+                poi_id=poi_id,
+                target_poi_id=eat_stage.primary.poi_id,
+                price=price,
+            )
+        )
+
+    if not addons and len(stages) == len(plan.stages) and not plan.addons:
+        return plan
+
+    updated = plan.model_copy(
+        update={
+            "stages": stages,
+            "order_label": order_label,
+            "addons": addons,
+        }
+    )
+    if stages != plan.stages:
+        updated.total_cost_estimate = _estimate_cost(profile.people_count, stages)
+        updated.summary = _summary(profile.scene, stages, order_label)
+        updated.score = _plan_score(updated)
+    return updated
+
+
 def merge_targeted_addon(
     plan: Plan,
     profile: GroupProfile,
     targeted: ResearchResult | None,
 ) -> Plan:
-    """精准搜完成后，把加餐阶段并入方案并绑定送餐餐厅 ID。"""
-    if targeted is None:
-        return plan
-
-    eat_stage = next((s for s in plan.stages if s.name == "吃"), None)
-    if eat_stage is None:
-        return plan
-
-    if any(s.name == "加餐" for s in plan.stages):
-        stages = []
-        changed = False
-        for s in plan.stages:
-            if s.name != "加餐":
-                stages.append(s)
-                continue
-            meta = dict(s.primary.metadata or {})
-            if not meta.get("deliver_to_poi_id"):
-                meta["deliver_to_poi_id"] = eat_stage.primary.poi_id
-                meta["target_restaurant"] = eat_stage.primary.poi_id
-                s = s.model_copy(
-                    update={
-                        "primary": s.primary.model_copy(update={"metadata": meta}),
-                        "notes": f"送至餐厅「{eat_stage.primary.name}」（{eat_stage.primary.poi_id}）",
-                    }
-                )
-                changed = True
-            stages.append(s)
-        if not changed:
-            return plan
-        updated = plan.model_copy(update={"stages": stages})
-        return updated
-
-    addon_result = next(
-        (s for s in targeted.stages if s.stage_name.startswith("加餐")),
-        None,
-    )
-    if addon_result is None or addon_result.selected is None:
-        return plan
-
-    addon = addon_result.selected
-    eat_poi_id = eat_stage.primary.poi_id
-    eat_name = eat_stage.primary.name
-    addon_meta = dict(addon.metadata or {})
-    addon_meta["target_restaurant"] = eat_poi_id
-    addon_meta["deliver_to_poi_id"] = eat_poi_id
-    addon_with_target = addon.model_copy(update={"metadata": addon_meta})
-
-    addon_start = _shift(eat_stage.start_time, _ADDON_AFTER_EAT_START)
-    new_stage = PlanStage(
-        name="加餐",
-        start_time=addon_start,
-        end_time=_shift(addon_start, _ADDON_DURATION),
-        primary=addon_with_target,
-        notes=f"送至餐厅「{eat_name}」（{eat_poi_id}）",
-    )
-
-    stages = sorted([*plan.stages, new_stage], key=lambda s: s.start_time)
-    updated = plan.model_copy(
-        update={
-            "stages": stages,
-            "order_label": " → ".join(s.name for s in stages),
-            "total_cost_estimate": _estimate_cost(profile.people_count, stages),
-        }
-    )
-    updated.summary = _summary(profile.scene, stages, updated.order_label)
-    updated.score = _plan_score(updated)
-    return updated
+    """向后兼容：改为 HIL 附加项，不再静默插入加餐阶段。"""
+    return attach_hil_addons(plan, profile, targeted)
 
 
 def _plan_score(plan: Plan) -> float:

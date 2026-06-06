@@ -38,14 +38,24 @@ from backend.state import AgentState
 from backend.tools.http_client import current_mode
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_FRONTEND_DIST = _PROJECT_ROOT / "frontend-v2" / "dist"
-_FRONTEND_ASSETS = _FRONTEND_DIST / "assets"
 
-FRONTEND_AVAILABLE = _FRONTEND_DIST.is_dir() and (_FRONTEND_DIST / "index.html").is_file()
+
+def _resolve_frontend_dist() -> Path | None:
+    for name in ("frontend", "frontend-v2"):
+        dist = _PROJECT_ROOT / name / "dist"
+        if dist.is_dir() and (dist / "index.html").is_file():
+            return dist
+    return None
+
+
+_FRONTEND_DIST = _resolve_frontend_dist()
+_FRONTEND_ASSETS = (_FRONTEND_DIST / "assets") if _FRONTEND_DIST else None
+
+FRONTEND_AVAILABLE = _FRONTEND_DIST is not None
 
 _BUILD_HINT = (
     "前端未构建。请在项目根目录执行：\n"
-    "  cd frontend-v2 && npm install && npm run build\n"
+    "  cd frontend && npm install && npm run build\n"
     "或直接运行 python app.py（会自动尝试构建）。"
 )
 
@@ -132,6 +142,7 @@ class ReplanAgentRequest(BaseModel):
 class ConfirmAgentRequest(BaseModel):
     session_id: str = Field(..., min_length=8, max_length=32)
     plan_id: str = "primary"
+    selected_addon_ids: list[str] = Field(default_factory=list)
 
 
 def _merge_stream_update(running: dict[str, Any], update: dict[str, Any] | None) -> None:
@@ -352,6 +363,13 @@ def confirm_agent(req: ConfirmAgentRequest) -> dict[str, object]:
     state = select_plan(state, req.plan_id)
     state = dict(state)
     state["user_confirmed"] = True
+    plan = state.get("plan")
+    if req.selected_addon_ids:
+        state["selected_addon_ids"] = list(req.selected_addon_ids)
+    elif plan and plan.addons:
+        state["selected_addon_ids"] = [a.addon_id for a in plan.addons]
+    else:
+        state["selected_addon_ids"] = []
 
     try:
         final: AgentState = execution_graph.invoke(state)  # type: ignore[arg-type]

@@ -53,6 +53,7 @@ class AgentState(TypedDict, total=False):
 
     # ── 用户在 HIL 节点的确认结果 ──
     user_confirmed: bool
+    selected_addon_ids: list[str]
 
     # ── Notifier 最终交付 ──
     summary_card: SummaryCard | None

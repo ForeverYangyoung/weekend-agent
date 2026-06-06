@@ -13,6 +13,9 @@ function traceLineClass(human: string, raw: string): string {
   if (isUiTraceLine(raw)) {
     return 'trace-line trace-line-ui'
   }
+  if (/历史档案唤醒|History Archive/i.test(raw)) {
+    return 'trace-line trace-line-recovery trace-line-strong'
+  }
   if (isCompareTraceLine(raw)) {
     return 'trace-line trace-line-compare'
   }
@@ -60,7 +63,7 @@ export function TracePanel({ lines, live, currentStep }: Props) {
       <div className="trace-panel-body">
         {lines.length === 0 ? (
           <div className="trace-empty">
-            左侧选择场景或开始规划后，这里会按步骤追加 Trace（含候选榜 / 方案对比 / 预检恢复）。
+            左侧选择场景或开始规划后，这里会按步骤追加 Trace（含 Zero-Skill Mock 档案行 / 对比 / 预检恢复）。
           </div>
         ) : (
           lines.map((line, i) => {

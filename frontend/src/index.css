@@ -603,15 +603,32 @@ body {
   border-radius: var(--radius-sm);
   border: 1px solid #e0f0e6;
 }
-.plan-helper-note {
+.plan-addons-section {
   margin-bottom: 10px;
-  padding: 8px 10px;
-  background: #f6fbf7;
-  border: 1px solid #e0f0e6;
+  padding: 10px;
+  background: var(--surface-muted, #f8f9fa);
+  border: 1px solid var(--border, #e8eaed);
   border-radius: var(--radius-sm);
-  color: #247a45;
-  font-size: 11px;
-  line-height: 1.5;
+}
+.plan-addons-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.plan-addon-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+.plan-addon-item input {
+  margin-top: 2px;
+  flex-shrink: 0;
 }
 .plan-active-constraints {
   margin-bottom: 10px;
@@ -714,6 +731,26 @@ body {
   color: #7a4d00;
   line-height: 1.5;
   max-width: 88%;
+}
+.preference-conflict-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  color: #9a6500;
+  margin-bottom: 6px;
+  letter-spacing: 0.02em;
+}
+.profile-chip-history {
+  border-color: #c9daf8;
+  background: #f0f5ff;
+}
+.profile-chip-source {
+  margin-left: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #3f5f99;
+  background: #dfe8fb;
+  padding: 1px 4px;
+  border-radius: 3px;
 }
 .badge-recommend {
   position: absolute;

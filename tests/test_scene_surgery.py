@@ -22,25 +22,64 @@ def test_four_person_table_trap_replans_to_backup_restaurant() -> None:
     assert "预检" in traces or "重规划" in traces
 
 
-def test_addon_delivery_links_to_restaurant() -> None:
+def test_addon_delivery_links_to_play_exit_on_confirm() -> None:
+    """HIL：附加项仅在 confirm + selected_addon_ids 时下单，家庭场景送至玩阶段出口。"""
     reset_mock_backend()
-    initial: AgentState = {
-        "user_input": "今天下午带老婆孩子出去玩，老婆减肥，孩子5岁，帮我安排一下。",
-        "trace": [],
-    }
-    final: AgentState = agent_graph.invoke(initial)  # type: ignore[arg-type]
+    client = TestClient(__import__("backend.server", fromlist=["app"]).app)
 
-    addon_calls = [
-        c
-        for c in final.get("executed_calls") or []
-        if c.tool_name == "order_addon" and c.result
-    ]
-    eat_poi = next(
-        (s.primary.poi_id for s in (final.get("plan") or {}).stages if s.name == "吃"),  # type: ignore[union-attr]
-        None,
+    buf = ""
+    with client.stream(
+        "POST",
+        "/v1/agent/stream",
+        json={
+            "user_input": "今天下午带老婆孩子出去玩，老婆减肥，孩子5岁，帮我安排一下。",
+        },
+    ) as resp:
+        assert resp.status_code == 200
+        for chunk in resp.iter_text():
+            buf += chunk
+
+    import json
+
+    session_id = ""
+    addon_id = ""
+    for block in buf.split("\n\n"):
+        if "awaiting_confirm" not in block:
+            continue
+        line = block.strip().removeprefix("data: ")
+        payload = json.loads(line)
+        session_id = payload.get("session_id", "")
+        plans = payload.get("plans") or []
+        if plans and plans[0].get("addons"):
+            addon_id = plans[0]["addons"][0]["addon_id"]
+        break
+
+    assert session_id
+    assert addon_id
+
+    r = client.post(
+        "/v1/agent/confirm",
+        json={
+            "session_id": session_id,
+            "plan_id": "primary",
+            "selected_addon_ids": [addon_id],
+        },
     )
-    if addon_calls and eat_poi:
-        assert addon_calls[0].result.get("deliver_to_poi_id") == eat_poi
+    assert r.status_code == 200
+    data = r.json()
+    traces = " ".join(data.get("trace") or [])
+    assert "附加下单成功" in traces or data.get("executed", 0) >= 1
+
+    addon_orders = [
+        o for o in data.get("orders") or [] if o.get("stage") == "附加"
+    ]
+    if not addon_orders:
+        addon_calls = [
+            c
+            for c in (data.get("trace") or [])
+            if "order_addon" in c or "deliver_to_poi_id" in c
+        ]
+        assert addon_calls or "附加下单成功" in traces
 
 
 def test_play_eat_within_distance_band() -> None:

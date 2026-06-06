@@ -164,6 +164,7 @@ export function mapPlansFromBackend(plans: BackendPlanPayload[]): DisplayPlan[] 
       play: p.play ?? emptyVenue(),
       eat: p.eat ?? emptyVenue(),
       addon: p.addon,
+      addons: p.addons,
       timeline,
       totalPrice: p.totalPrice ?? '—',
       score: p.score ?? 0,

@@ -72,6 +72,13 @@ export interface BackendPlanPayload {
   play?: { name: string; time: string; desc: string; tags: string[]; priceLabel?: string; distanceLabel?: string }
   eat?: { name: string; time: string; desc: string; tags: string[]; priceLabel?: string; distanceLabel?: string }
   addon?: { name: string; desc: string; tags: string[]; priceLabel?: string; distanceLabel?: string }
+  addons?: Array<{
+    addon_id: string
+    type?: string
+    description: string
+    price: number
+    target_poi_id?: string
+  }>
 }
 
 export interface AgentStatePayload {
@@ -161,6 +168,14 @@ export interface PlanTimelineItem {
   tags: string[]
 }
 
+export interface PlanAddon {
+  addon_id: string
+  type?: string
+  description: string
+  price: number
+  target_poi_id?: string
+}
+
 export interface DisplayPlan {
   id: string
   title: string
@@ -171,6 +186,7 @@ export interface DisplayPlan {
   play: PlanVenue
   eat: PlanVenue
   addon?: { name: string; desc: string; tags: string[] }
+  addons?: PlanAddon[]
   timeline: PlanTimelineItem[]
   totalPrice: string
   score: number

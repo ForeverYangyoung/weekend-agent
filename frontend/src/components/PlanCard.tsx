@@ -4,7 +4,9 @@ interface Props {
   plan: DisplayPlan
   isTop1?: boolean
   alternativeAccepted?: boolean
-  onConfirm: (planId: string) => void
+  selectedAddonIds?: Set<string>
+  onConfirm: (planId: string, selectedAddonIds: string[]) => void
+  onToggleAddon?: (planId: string, addonId: string, checked: boolean) => void
   onEditPreference: () => void
   onAcceptAlternative?: (planId: string) => void
   disabled?: boolean
@@ -14,7 +16,9 @@ export function PlanCard({
   plan,
   isTop1,
   alternativeAccepted,
+  selectedAddonIds,
   onConfirm,
+  onToggleAddon,
   onEditPreference,
   onAcceptAlternative,
   disabled,
@@ -93,12 +97,6 @@ export function PlanCard({
         </div>
       )}
 
-      {plan.addon && canOrder && (
-        <div className="plan-helper-note">
-          已顺手安排加餐送到餐厅，玩完过去吃饭时不用再绕路取。
-        </div>
-      )}
-
       <div className="plan-timeline">
         {plan.timeline.map((item, index) => (
           <div key={`${item.kind}-${index}`}>
@@ -113,6 +111,30 @@ export function PlanCard({
       <div className="plan-card-footer">
         <span className="plan-price">{plan.totalPrice}</span>
       </div>
+
+      {plan.addons && plan.addons.length > 0 && canOrder && (
+        <div className="plan-addons-section">
+          <div className="plan-addons-label">智能附加建议（顺路/送到店）</div>
+          {plan.addons.map((addon) => {
+            const checked = selectedAddonIds?.has(addon.addon_id) ?? true
+            return (
+              <label key={addon.addon_id} className="plan-addon-item">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) =>
+                    onToggleAddon?.(plan.id, addon.addon_id, e.target.checked)
+                  }
+                  disabled={disabled}
+                />
+                <span>
+                  {addon.description} (¥{addon.price})
+                </span>
+              </label>
+            )
+          })}
+        </div>
+      )}
 
       <div className="plan-card-actions">
         {plan.issueKind === 'alternative_available' && !alternativeAccepted && (
@@ -142,7 +164,14 @@ export function PlanCard({
               ? 'btn-secondary'
               : 'btn-primary'
           }
-          onClick={() => onConfirm(plan.id)}
+          onClick={() =>
+            onConfirm(
+              plan.id,
+              plan.addons
+                ?.filter((a) => (selectedAddonIds?.has(a.addon_id) ?? true))
+                .map((a) => a.addon_id) ?? [],
+            )
+          }
           disabled={confirmDisabled}
         >
           {canOrder

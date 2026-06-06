@@ -43,6 +43,11 @@ export function humanizeTraceLine(raw: string): string {
     return body.replace(/对比·/g, 'COMPARE | ')
   }
 
+  if (raw.includes('[Profiler]') && body.includes('[历史档案唤醒]')) {
+    const detail = body.replace(/\[历史档案唤醒\]\s*/g, '').trim()
+    return `Profiler | Zero-Skill·隐式画像(Mock) | ${detail}`
+  }
+
   if (raw.includes('[Profiler]')) {
     const scene = body.match(/scene=(\w+)/)?.[1] ?? ''
     const people = body.match(/people=(\d+)/)?.[1]

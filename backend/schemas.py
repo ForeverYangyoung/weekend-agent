@@ -42,6 +42,7 @@ class GroupProfile(BaseModel):
     duration_hours: float = 4.0
     start_time: str | None = None  # ISO 字符串，None 表示尽快出发
     dietary: list[str] = Field(default_factory=list)  # 例 ["低卡", "不辣"]
+    forbidden_tags: list[str] = Field(default_factory=list)  # 历史禁忌，例 ["重辣", "特辣"]
     interests: list[str] = Field(default_factory=list)  # 例 ["亲子", "展览"]
     budget_per_person: int | None = None
     district: str | None = None  # 目标区域，如「海淀区」
@@ -87,6 +88,17 @@ class POICandidate(BaseModel):
     breakdown: ScoreBreakdown | None = None
 
 
+class PlanAddon(BaseModel):
+    """HIL 可选附加项：用户勾选后才在 Executor 下单。"""
+
+    addon_id: str
+    type: str = "surprise"  # refresh / surprise
+    description: str
+    poi_id: str
+    target_poi_id: str
+    price: int = 0
+
+
 class PlanStage(BaseModel):
     """方案的一个阶段。一个阶段对应一段时间窗口和一个动作。"""
 
@@ -107,6 +119,7 @@ class Plan(BaseModel):
     score: float = 0.0
     # 阶段顺序，例如 "玩→吃→加餐" / "吃→玩→加餐"，给评委展示「试过多种顺序」
     order_label: str = ""
+    addons: list[PlanAddon] = Field(default_factory=list)
 
 
 # ─────────────────────────── Researcher 输出 ───────────────────────────
