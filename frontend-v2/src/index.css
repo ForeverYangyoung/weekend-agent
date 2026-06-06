@@ -374,6 +374,32 @@ body {
   border-radius: var(--radius-sm);
   border: 1px solid #e0f0e6;
 }
+.plan-active-constraints {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: #f5f8ff;
+  border-radius: var(--radius-sm);
+  border: 1px solid #dfe8fb;
+}
+.plan-active-constraints-label {
+  font-size: 11px;
+  color: #3f5f99;
+  margin-bottom: 6px;
+  font-weight: 700;
+}
+.plan-active-constraints-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.active-constraint-tag {
+  font-size: 10px;
+  color: #2f5fbf;
+  background: #e9f0ff;
+  padding: 2px 7px;
+  border-radius: 10px;
+  line-height: 1.4;
+}
 .plan-match-label {
   font-size: 11px;
   color: var(--text-secondary);
@@ -392,23 +418,63 @@ body {
   border-radius: 10px;
   line-height: 1.4;
 }
-.plan-constraint-issues {
+.plan-issue-panel {
   margin-bottom: 10px;
   padding: 8px 10px;
+  border-radius: var(--radius-sm);
+}
+.plan-issue-panel-error {
   background: #fff1f2;
   border: 1px solid rgba(238, 63, 77, 0.22);
-  border-radius: var(--radius-sm);
+}
+.plan-issue-panel-warn {
+  background: #fff8eb;
+  border: 1px solid rgba(255, 184, 0, 0.35);
+}
+.plan-issue-panel-info {
+  background: #f0f7ff;
+  border: 1px solid rgba(64, 128, 255, 0.25);
+}
+.plan-issue-panel-accepted {
+  background: #f6fbf7;
+  border: 1px solid #e0f0e6;
+}
+.plan-issue-block + .plan-issue-block {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
 }
 .plan-issue-label {
   font-size: 11px;
-  color: var(--error);
   font-weight: 700;
   margin-bottom: 4px;
 }
+.plan-issue-panel-error .plan-issue-label { color: var(--error); }
+.plan-issue-panel-warn .plan-issue-label { color: #b26a00; }
+.plan-issue-panel-info .plan-issue-label { color: #2f5fbf; }
+.plan-issue-panel-accepted .plan-issue-label { color: var(--success); }
 .plan-issue-item {
   font-size: 11px;
-  color: #9f1d2b;
   line-height: 1.5;
+}
+.plan-issue-panel-error .plan-issue-item { color: #9f1d2b; }
+.plan-issue-panel-warn .plan-issue-item { color: #7a4d00; }
+.plan-issue-panel-info .plan-issue-item { color: #2a4a8a; }
+.plan-issue-suggestions {
+  margin: 6px 0 0 16px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.preference-conflict-banner {
+  background: #fff8eb;
+  border: 1px solid rgba(255, 184, 0, 0.35);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #7a4d00;
+  line-height: 1.5;
+  max-width: 88%;
 }
 .badge-recommend {
   position: absolute;

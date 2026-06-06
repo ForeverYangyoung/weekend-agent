@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import type {
   ChatMessage,
   DisplayPlan,
+  PreferenceConflict,
   ProfileChip,
   ProfileOverride,
   ProgressStep,
@@ -139,6 +140,8 @@ export default function App() {
   const [isReplanning, setIsReplanning] = useState(false)
   const [isPreferencePanelOpen, setIsPreferencePanelOpen] = useState(false)
   const [panelPreferences, setPanelPreferences] = useState(DEFAULT_PANEL_PREFS)
+  const [preferenceConflicts, setPreferenceConflicts] = useState<PreferenceConflict[]>([])
+  const [acceptedAlternatives, setAcceptedAlternatives] = useState<Set<string>>(new Set())
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = useCallback(() => {
@@ -178,17 +181,24 @@ export default function App() {
 
     setSessionId(awaiting.session_id)
     setProfileChips(awaiting.profile_chips ?? [])
+    setPreferenceConflicts(awaiting.preference_conflicts ?? [])
+    setAcceptedAlternatives(new Set())
     setPendingOverrides([])
     setPlans(mapPlansFromBackend(awaiting.plans))
     setProgressSteps(progressFromTrace(lastTrace).map((s) => ({ ...s, done: true })))
 
     const chipText = (awaiting.profile_chips ?? []).map((c) => c.label).join('、')
+    const conflictHint =
+      (awaiting.preference_conflicts ?? []).length > 0
+        ? '检测到饮食偏好互相矛盾，请先点「修改矛盾偏好」或上方标签调整后再规划。'
+        : ''
     const planMsg = addMessage({
       role: 'ai',
       type: 'plans',
-      text: chipText
-        ? `已按约束（${chipText}）筛出 ${awaiting.plans.length} 套不同店组合。卡片绿标是各 Agent 的命中说明；备选会标明与推荐的差异。`
-        : '预检完成！下方是真实候选方案。可点标签修改偏好后重搜，满意再点「选这个」确认下单。',
+      text: conflictHint
+        || (chipText
+          ? `已按约束（${chipText}）筛出 ${awaiting.plans.length} 套不同店组合。绿标是命中说明；若附近暂无指定菜系，会说明距离原因并给替代选项。`
+          : '预检完成！下方是真实候选方案。可点标签修改偏好后重搜，满意再点「选这个」确认下单。'),
     })
     planMsg.plans = mapPlansFromBackend(awaiting.plans)
 
@@ -205,6 +215,8 @@ export default function App() {
     setInputDisabled(true)
     setProgressSteps(TRACE_PROGRESS.map((t) => ({ label: t.label, done: false })))
     setPendingOverrides([])
+    setPreferenceConflicts([])
+    setAcceptedAlternatives(new Set())
     setSessionId(null)
 
     runInitialStream(text.trim())
@@ -230,12 +242,24 @@ export default function App() {
     setProfileChips((prev) =>
       prev.filter((c) => !(c.key === override.key && c.value === override.value)),
     )
+    if (override.key === 'dietary') {
+      setPreferenceConflicts((prev) =>
+        prev.filter((c) => !c.conflictingTags?.includes(override.value)),
+      )
+    }
     setAppState('hil_editing')
   }
 
   function handleAddChip(override: ProfileOverride) {
     setPendingOverrides((prev) => [...prev, override])
     setProfileChips((prev) => mergeProfileChips(prev, override))
+    if (override.key === 'dietary' && override.value) {
+      setPreferenceConflicts((prev) => {
+        if (!prev.length) return prev
+        const left = prev.filter((c) => !c.conflictingTags?.includes(override.value))
+        return left
+      })
+    }
     setAppState('hil_editing')
   }
 
@@ -324,6 +348,16 @@ export default function App() {
     await runReplanStream(overrides, `按面板调整偏好（${prefs.diet} · ${prefs.distance}）`)
   }
 
+  function handleAcceptAlternative(planId: string) {
+    setAcceptedAlternatives((prev) => new Set([...prev, planId]))
+    setAppState('plans_displayed')
+  }
+
+  function handleEditPreference() {
+    setIsPreferencePanelOpen(true)
+    setAppState('hil_editing')
+  }
+
   function handleRejectPlan() {
     addMessage({
       role: 'user',
@@ -380,8 +414,10 @@ export default function App() {
                     <div className="bubble-text">{msg.text}</div>
                     <PlanCards
                       plans={msg.plans}
+                      acceptedAlternatives={acceptedAlternatives}
                       onConfirm={handleConfirmPlan}
-                      onEditPreference={() => setIsPreferencePanelOpen(true)}
+                      onEditPreference={handleEditPreference}
+                      onAcceptAlternative={handleAcceptAlternative}
                       onReject={handleRejectPlan}
                       disabled={appState === 'confirmed' || inputDisabled}
                     />
@@ -406,6 +442,18 @@ export default function App() {
               </div>
             )
           })}
+
+          {showChipEditor && preferenceConflicts.length > 0 && (
+            <div className="msg-row msg-ai">
+              <div className="preference-conflict-banner">
+                {preferenceConflicts.map((c, i) => (
+                  <div key={i}>
+                    <strong>{c.headline}</strong> {c.detail}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {showChipEditor && profileChips.length > 0 && (
             <div className="msg-row msg-ai">

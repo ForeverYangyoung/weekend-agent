@@ -25,6 +25,7 @@ from backend.schemas import ToolStatus
 from backend.hil import (
     BUILD_VERSION,
     build_plans_payload,
+    detect_preference_conflicts,
     create_session,
     get_session,
     profile_chips,
@@ -195,6 +196,7 @@ def _run_planning_stream(
                     "dry_run_ok": len(dry_runs),
                 },
                 "profile_chips": profile_chips(gp),
+                "preference_conflicts": detect_preference_conflicts(gp),
                 "plans": build_plans_payload(last),
                 "dry_run_calls": _json_safe(dry_runs),
                 "message": "预检完成，请确认方案或点改偏好后重规划",

@@ -13,8 +13,8 @@ from backend.agents.planner import (
     _wants_light_meal,
 )
 
-BUILD_VERSION = "2026-06-06-constraint-v3"
-from backend.schemas import GroupProfile, Plan
+BUILD_VERSION = "2026-06-06-issue-v4"
+from backend.schemas import GroupProfile, Plan, POICandidate, ResearchResult
 from backend.state import AgentState
 
 _sessions: dict[str, AgentState] = {}
@@ -97,6 +97,33 @@ def _venue_extras(stage_name: str, meta: dict) -> dict[str, str]:
     return {"priceLabel": price_label, "distanceLabel": distance_label}
 
 
+def _build_active_constraints(profile: GroupProfile | None) -> list[str]:
+    """返回当前会话真正生效的约束，供前端先展示。"""
+    if profile is None:
+        return []
+
+    constraints: list[str] = []
+    scene_labels = {
+        "family": "场景: 家庭",
+        "friends": "场景: 朋友",
+        "couple": "场景: 情侣",
+        "solo": "场景: 独自",
+    }
+    if profile.scene in scene_labels:
+        constraints.append(scene_labels[profile.scene])
+    if profile.people_count:
+        constraints.append(f"人数: {profile.people_count} 人")
+    if profile.distance_limit_km:
+        constraints.append(f"距离: ≤{profile.distance_limit_km:.0f}km")
+    if profile.duration_hours:
+        constraints.append(f"时长: 约{profile.duration_hours:.0f}小时")
+    if profile.kids_ages:
+        constraints.append(f"孩子: {profile.kids_ages[0]}岁")
+    for tag in profile.dietary:
+        constraints.append(f"饮食: {tag}")
+    return constraints
+
+
 def _build_match_reasons(plan: Plan, profile: GroupProfile | None) -> list[str]:
     """把 Profiler / Planner / Critic 命中的约束翻成可展示文案。"""
     if profile is None:
@@ -161,8 +188,82 @@ def _build_match_reasons(plan: Plan, profile: GroupProfile | None) -> list[str]:
     return reasons
 
 
+_HEAVY_CUISINE_TAGS = frozenset({"川菜", "火锅", "烤肉", "重口味", "湘菜"})
+_MAX_PLAY_EAT_DIST_KM = 3.0
+
+
+def detect_preference_conflicts(profile: GroupProfile | None) -> list[dict[str, Any]]:
+    """画像层矛盾：轻食/减肥 vs 重口味菜系等，需用户先改偏好再规划。"""
+    if profile is None:
+        return []
+
+    conflicts: list[dict[str, Any]] = []
+    cuisines = _explicit_cuisines(profile)
+    heavy_cuisines = sorted(cuisines & _HEAVY_CUISINE_TAGS)
+    light = _wants_light_meal(profile)
+
+    if light and heavy_cuisines:
+        heavy_text = "、".join(heavy_cuisines)
+        conflicts.append(
+            {
+                "code": "light_vs_heavy_cuisine",
+                "headline": "饮食偏好互相矛盾",
+                "detail": (
+                    f"您同时要求「轻食/低卡」和「{heavy_text}」，"
+                    "很难在同一家餐厅同时满足，请先调整偏好。"
+                ),
+                "suggestions": [
+                    f"去掉「{heavy_text}」，保留轻食/减肥",
+                    "去掉轻食要求，保留重口味菜系",
+                ],
+                "conflictingTags": ["轻食", "低卡", *heavy_cuisines],
+            }
+        )
+
+    if light and "重口味" in profile.dietary:
+        conflicts.append(
+            {
+                "code": "light_vs_heavy_taste",
+                "headline": "饮食偏好互相矛盾",
+                "detail": "您同时要求「轻食/低卡」和「重口味」，请先选择其一。",
+                "suggestions": ["保留轻食/减肥", "改为重口味（烤肉/火锅）"],
+                "conflictingTags": ["轻食", "低卡", "重口味"],
+            }
+        )
+
+    return conflicts
+
+
+def _eat_candidates_matching_near_play(
+    research: ResearchResult | None,
+    play: POICandidate,
+    profile: GroupProfile,
+    cuisines: set[str],
+) -> list[POICandidate]:
+    """在活动地顺路范围内，是否存在符合菜系的餐厅候选。"""
+    if research is None or not cuisines:
+        return []
+
+    eat_stage = next((s for s in research.stages if s.stage_name == "吃"), None)
+    if eat_stage is None:
+        return []
+
+    d_play = float(play.metadata.get("distance_km", 0) or 0)
+    matches: list[POICandidate] = []
+    for candidate in eat_stage.candidates:
+        if not _matches_cuisine(candidate, cuisines):
+            continue
+        d_eat = float(candidate.metadata.get("distance_km", 0) or 0)
+        if abs(d_play - d_eat) > _MAX_PLAY_EAT_DIST_KM:
+            continue
+        if d_eat > profile.distance_limit_km + 1e-6:
+            continue
+        matches.append(candidate)
+    return matches
+
+
 def _validate_plan_constraints(plan: Plan, profile: GroupProfile | None) -> list[str]:
-    """最后一道闸：任何硬约束不满足，都不能包装成可确认方案。"""
+    """原始约束校验文案（供内部分类）。"""
     if profile is None:
         return []
 
@@ -187,12 +288,123 @@ def _validate_plan_constraints(plan: Plan, profile: GroupProfile | None) -> list
     if play is not None and eat is not None:
         d_play = float(play.primary.metadata.get("distance_km", 0) or 0)
         d_eat = float(eat.primary.metadata.get("distance_km", 0) or 0)
-        if abs(d_play - d_eat) > 3.0:
+        if abs(d_play - d_eat) > _MAX_PLAY_EAT_DIST_KM:
             issues.append("顺路约束未满足：玩/吃距离差超过 3km")
         if max(d_play, d_eat) > profile.distance_limit_km:
             issues.append(f"距离约束未满足：超出 {profile.distance_limit_km:.0f}km")
 
     return issues
+
+
+def _build_plan_issues(
+    plan: Plan,
+    profile: GroupProfile | None,
+    research: ResearchResult | None,
+    pref_conflicts: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], str, bool]:
+    """把校验结果翻成用户可理解的 issue，并给出 issueKind。"""
+    if profile is None:
+        return [], "ok", True
+
+    if pref_conflicts:
+        return (
+            [
+                {
+                    "code": c["code"],
+                    "headline": c["headline"],
+                    "detail": c["detail"],
+                    "suggestions": c.get("suggestions", []),
+                    "allowAcceptAlternative": False,
+                }
+                for c in pref_conflicts
+            ],
+            "needs_preference_fix",
+            False,
+        )
+
+    raw_issues = _validate_plan_constraints(plan, profile)
+    if not raw_issues:
+        return [], "ok", True
+
+    play = _stage_by_name(plan, "玩")
+    eat = _stage_by_name(plan, "吃")
+    play_label = _short_poi_name(play.primary.name) if play else "活动地"
+    eat_name = eat.primary.name if eat else "当前餐厅"
+
+    structured: list[dict[str, Any]] = []
+    issue_kind = "blocked"
+    allow_accept = False
+
+    for raw in raw_issues:
+        if raw.startswith("菜系约束未满足：") and play and eat:
+            missing = raw.split("不匹配 ", 1)[-1].strip()
+            nearby = _eat_candidates_matching_near_play(
+                research, play.primary, profile, {missing}
+            )
+            if not nearby:
+                structured.append(
+                    {
+                        "code": "cuisine_unavailable",
+                        "headline": "附近暂无符合菜系的餐厅",
+                        "detail": (
+                            f"在「{play_label}」周边 {_MAX_PLAY_EAT_DIST_KM:g}km 内"
+                            f"找不到「{missing}」餐厅；已就近推荐「{_short_poi_name(eat_name)}」作为顺路替代。"
+                        ),
+                        "suggestions": [
+                            f"接受「{_short_poi_name(eat_name)}」替代方案",
+                            f"修改偏好，去掉「{missing}」",
+                            "换一个活动区域后再找该菜系",
+                        ],
+                        "allowAcceptAlternative": True,
+                        "missingCuisine": missing,
+                        "playArea": play_label,
+                    }
+                )
+                issue_kind = "alternative_available"
+                allow_accept = True
+                continue
+
+        if "顺路约束" in raw or "距离约束" in raw:
+            structured.append(
+                {
+                    "code": "distance_limit",
+                    "headline": "距离或顺路条件偏紧",
+                    "detail": (
+                        f"{raw}。可放宽距离上限，或换更近的活动/餐厅组合。"
+                    ),
+                    "suggestions": [
+                        "放宽距离（如改为 15km）",
+                        "修改偏好后重新规划",
+                    ],
+                    "allowAcceptAlternative": False,
+                }
+            )
+            issue_kind = "blocked"
+            continue
+
+        structured.append(
+            {
+                "code": "constraint_mismatch",
+                "headline": "方案与偏好不完全匹配",
+                "detail": raw,
+                "suggestions": ["修改偏好后重新规划"],
+                "allowAcceptAlternative": False,
+            }
+        )
+
+    if not structured:
+        structured = [
+            {
+                "code": "constraint_mismatch",
+                "headline": "方案需调整",
+                "detail": raw_issues[0],
+                "suggestions": ["修改偏好后重新规划"],
+                "allowAcceptAlternative": False,
+            }
+        ]
+
+    _ = allow_accept  # 前端按 issueKind + 用户「接受替代」再放开下单
+    return structured, issue_kind, False
 
 
 def _diff_summary(primary: Plan | None, alt: Plan) -> str:
@@ -220,21 +432,33 @@ def plan_to_display(
     *,
     profile: GroupProfile | None = None,
     primary: Plan | None = None,
+    research: ResearchResult | None = None,
+    pref_conflicts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """前端行程卡 JSON。"""
     stage_map = {"玩": "play", "吃": "eat", "加餐": "addon"}
     match_reasons = _build_match_reasons(plan, profile)
-    constraint_issues = _validate_plan_constraints(plan, profile)
+    conflicts = pref_conflicts if pref_conflicts is not None else detect_preference_conflicts(profile)
+    plan_issues, issue_kind, is_valid = _build_plan_issues(
+        plan, profile, research, conflicts
+    )
+    constraint_issues = [i["detail"] for i in plan_issues]
     payload: dict[str, Any] = {
         "id": plan_id,
         "title": plan.summary,
         "order_label": plan.order_label,
         "score": int(round(plan.score * 100)) if plan.score <= 1 else int(plan.score),
         "totalPrice": f"¥{max(plan.total_cost_estimate // max(people_count, 1), 0)}/人",
+        "activeConstraints": _build_active_constraints(profile),
         "highlights": match_reasons,
         "matchReasons": match_reasons,
+        "planIssues": plan_issues,
+        "issueKind": issue_kind,
+        "allowAcceptAlternative": any(
+            i.get("allowAcceptAlternative") for i in plan_issues
+        ),
         "constraintIssues": constraint_issues,
-        "isValid": not constraint_issues,
+        "isValid": is_valid,
     }
 
     if plan_id != "primary" and primary is not None:
@@ -263,17 +487,35 @@ def plan_to_display(
 def build_plans_payload(state: AgentState) -> list[dict[str, Any]]:
     profile = state.get("group_profile")
     people = profile.people_count if profile else 1
+    research = state.get("research_result")
+    pref_conflicts = detect_preference_conflicts(profile)
     items: list[dict[str, Any]] = []
 
     plan = state.get("plan")
     if plan:
         items.append(
-            plan_to_display(plan, "primary", people, profile=profile, primary=None)
+            plan_to_display(
+                plan,
+                "primary",
+                people,
+                profile=profile,
+                primary=None,
+                research=research,
+                pref_conflicts=pref_conflicts,
+            )
         )
 
     for i, alt in enumerate(state.get("plan_alternatives") or []):
         items.append(
-            plan_to_display(alt, f"alt_{i}", people, profile=profile, primary=plan)
+            plan_to_display(
+                alt,
+                f"alt_{i}",
+                people,
+                profile=profile,
+                primary=plan,
+                research=research,
+                pref_conflicts=pref_conflicts,
+            )
         )
 
     return items

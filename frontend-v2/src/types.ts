@@ -9,6 +9,7 @@ export interface SSEEvent {
   summary?: SummaryPayload
   summary_card?: SummaryCard
   profile_chips?: ProfileChip[]
+  preference_conflicts?: PreferenceConflict[]
   plans?: BackendPlanPayload[]
   dry_run_calls?: unknown[]
   message?: string
@@ -29,14 +30,38 @@ export interface ProfileOverride {
   action: 'add' | 'remove' | 'set'
 }
 
+export type PlanIssueKind = 'ok' | 'needs_preference_fix' | 'alternative_available' | 'blocked'
+
+export interface PlanIssue {
+  code: string
+  headline: string
+  detail: string
+  suggestions?: string[]
+  allowAcceptAlternative?: boolean
+  missingCuisine?: string
+  playArea?: string
+}
+
+export interface PreferenceConflict {
+  code: string
+  headline: string
+  detail: string
+  suggestions?: string[]
+  conflictingTags?: string[]
+}
+
 export interface BackendPlanPayload {
   id: string
   title: string
   order_label?: string
   score?: number
   totalPrice?: string
+  activeConstraints?: string[]
   highlights?: string[]
   matchReasons?: string[]
+  planIssues?: PlanIssue[]
+  issueKind?: PlanIssueKind
+  allowAcceptAlternative?: boolean
   constraintIssues?: string[]
   isValid?: boolean
   diffSummary?: string
@@ -138,6 +163,7 @@ export interface DisplayPlan {
   orderLabel: string
   venueChain: string
   diffSummary: string
+  activeConstraints: string[]
   play: PlanVenue
   eat: PlanVenue
   addon?: { name: string; desc: string; tags: string[] }
@@ -146,6 +172,9 @@ export interface DisplayPlan {
   score: number
   highlights: string[]
   matchReasons: string[]
+  planIssues: PlanIssue[]
+  issueKind: PlanIssueKind
+  allowAcceptAlternative: boolean
   constraintIssues: string[]
   isValid: boolean
 }

@@ -141,7 +141,18 @@ export function mapPlansFromBackend(plans: BackendPlanPayload[]): DisplayPlan[] 
       : p.highlights?.length
         ? p.highlights
         : []
-    const constraintIssues = validateFrontendConstraints(p, matchReasons)
+    const extraIssues = validateFrontendConstraints(p, matchReasons)
+    const planIssues = p.planIssues?.length
+      ? p.planIssues
+      : extraIssues.map((detail) => ({
+          code: 'constraint_mismatch',
+          headline: '方案与偏好不完全匹配',
+          detail,
+          suggestions: ['修改偏好后重新规划'],
+          allowAcceptAlternative: false,
+        }))
+    const issueKind = p.issueKind ?? (planIssues.length ? 'blocked' : 'ok')
+    const constraintIssues = planIssues.map((i) => i.detail)
 
     return {
       id: p.id,
@@ -149,6 +160,7 @@ export function mapPlansFromBackend(plans: BackendPlanPayload[]): DisplayPlan[] 
       orderLabel,
       venueChain,
       diffSummary: p.diffSummary ?? (p.id === 'primary' ? '综合评分最高' : '备选方案'),
+      activeConstraints: p.activeConstraints ?? [],
       play: p.play ?? emptyVenue(),
       eat: p.eat ?? emptyVenue(),
       addon: p.addon,
@@ -157,8 +169,11 @@ export function mapPlansFromBackend(plans: BackendPlanPayload[]): DisplayPlan[] 
       score: p.score ?? 0,
       highlights: matchReasons.length ? matchReasons : [orderLabel],
       matchReasons,
+      planIssues,
+      issueKind,
+      allowAcceptAlternative: p.allowAcceptAlternative ?? false,
       constraintIssues,
-      isValid: (p.isValid ?? true) && constraintIssues.length === 0,
+      isValid: (p.isValid ?? true) && extraIssues.length === 0,
     }
   })
 }

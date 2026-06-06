@@ -3,29 +3,82 @@ import type { DisplayPlan } from '../types'
 interface Props {
   plan: DisplayPlan
   isTop1?: boolean
+  alternativeAccepted?: boolean
   onConfirm: (planId: string) => void
   onEditPreference: () => void
+  onAcceptAlternative?: (planId: string) => void
   disabled?: boolean
 }
 
-export function PlanCard({ plan, isTop1, onConfirm, onEditPreference, disabled }: Props) {
-  const confirmDisabled = disabled || !plan.isValid
+export function PlanCard({
+  plan,
+  isTop1,
+  alternativeAccepted,
+  onConfirm,
+  onEditPreference,
+  onAcceptAlternative,
+  disabled,
+}: Props) {
+  const canOrder =
+    plan.isValid || (plan.issueKind === 'alternative_available' && alternativeAccepted)
+  const confirmDisabled = disabled || !canOrder
+  const showIssuePanel = plan.planIssues.length > 0 && !canOrder
+
+  const badgeLabel =
+    plan.issueKind === 'needs_preference_fix'
+      ? '待改偏好'
+      : plan.issueKind === 'alternative_available'
+        ? '就近替代'
+        : '需重规划'
+
+  const issuePanelClass =
+    plan.issueKind === 'needs_preference_fix'
+      ? 'plan-issue-panel plan-issue-panel-warn'
+      : plan.issueKind === 'alternative_available'
+        ? 'plan-issue-panel plan-issue-panel-info'
+        : 'plan-issue-panel plan-issue-panel-error'
 
   return (
-    <div className={`plan-card ${plan.isValid ? '' : 'plan-card-invalid'}`}>
+    <div className={`plan-card ${canOrder ? '' : 'plan-card-invalid'}`}>
       <div className="plan-card-header">
         <span className="plan-card-title">{plan.venueChain}</span>
         <span className="plan-card-subtitle">{plan.diffSummary}</span>
-        {isTop1 && plan.isValid && <div className="badge-recommend">推荐</div>}
-        {!plan.isValid && <div className="badge-invalid">需重规划</div>}
+        {isTop1 && canOrder && <div className="badge-recommend">推荐</div>}
+        {!canOrder && <div className="badge-invalid">{badgeLabel}</div>}
       </div>
 
-      {!plan.isValid && (
-        <div className="plan-constraint-issues">
-          <div className="plan-issue-label">约束冲突，已禁止下单</div>
-          {plan.constraintIssues.map((issue, i) => (
-            <div key={i} className="plan-issue-item">{issue}</div>
+      {plan.activeConstraints.length > 0 && (
+        <div className="plan-active-constraints">
+          <div className="plan-active-constraints-label">当前生效约束</div>
+          <div className="plan-active-constraints-tags">
+            {plan.activeConstraints.map((c, i) => (
+              <span key={`${c}-${i}`} className="active-constraint-tag">{c}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showIssuePanel && (
+        <div className={issuePanelClass}>
+          {plan.planIssues.map((issue, i) => (
+            <div key={i} className="plan-issue-block">
+              <div className="plan-issue-label">{issue.headline}</div>
+              <div className="plan-issue-item">{issue.detail}</div>
+              {issue.suggestions && issue.suggestions.length > 0 && (
+                <ul className="plan-issue-suggestions">
+                  {issue.suggestions.map((s, j) => (
+                    <li key={j}>{s}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
           ))}
+        </div>
+      )}
+
+      {plan.issueKind === 'alternative_available' && alternativeAccepted && (
+        <div className="plan-issue-panel plan-issue-panel-accepted">
+          <div className="plan-issue-label">已接受就近替代方案，可以下单</div>
         </div>
       )}
 
@@ -56,21 +109,43 @@ export function PlanCard({ plan, isTop1, onConfirm, onEditPreference, disabled }
       </div>
 
       <div className="plan-card-actions">
+        {plan.issueKind === 'alternative_available' && !alternativeAccepted && (
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => onAcceptAlternative?.(plan.id)}
+            disabled={disabled}
+          >
+            接受替代方案
+          </button>
+        )}
         <button
           type="button"
-          className="btn-secondary"
+          className={
+            plan.issueKind === 'needs_preference_fix' ? 'btn-primary' : 'btn-secondary'
+          }
           onClick={onEditPreference}
           disabled={disabled}
         >
-          修改偏好重提
+          {plan.issueKind === 'needs_preference_fix' ? '修改矛盾偏好' : '修改偏好重提'}
         </button>
         <button
           type="button"
-          className="btn-primary"
+          className={
+            plan.issueKind === 'alternative_available' && !alternativeAccepted
+              ? 'btn-secondary'
+              : 'btn-primary'
+          }
           onClick={() => onConfirm(plan.id)}
           disabled={confirmDisabled}
         >
-          {plan.isValid ? '选这个（一键下单）' : '先重新规划'}
+          {canOrder
+            ? '选这个（一键下单）'
+            : plan.issueKind === 'needs_preference_fix'
+              ? '请先改偏好'
+              : plan.issueKind === 'alternative_available'
+                ? '或先接受替代'
+                : '先重新规划'}
         </button>
       </div>
     </div>

@@ -77,9 +77,8 @@ def _candidate_text(c: POICandidate) -> str:
 
 
 def _explicit_cuisines(profile: GroupProfile) -> set[str]:
-    """用户明确指定的菜系（来自 dietary / interests / HIL 点改）。"""
-    combined = set(profile.dietary) | set(profile.interests)
-    return {t for t in combined if t in _CUISINE_TAGS}
+    """用户明确指定的硬菜系约束（仅来自 dietary / HIL 点改）。"""
+    return {t for t in set(profile.dietary) if t in _CUISINE_TAGS}
 
 
 def _matches_cuisine(c: POICandidate, cuisines: set[str]) -> bool:
@@ -92,9 +91,7 @@ _HEAVY_FOOD_KEYS = ("烤肉", "火锅", "烧烤", "重口味", "川菜", "湘菜
 
 def _wants_light_meal(profile: GroupProfile) -> bool:
     light = {"轻食", "低卡"}
-    return bool(light & set(profile.dietary)) or bool(
-        light & _explicit_cuisines(profile)
-    ) or bool(light & set(profile.interests))
+    return bool(light & set(profile.dietary))
 
 
 def _wants_heavy_meal(profile: GroupProfile) -> bool:
